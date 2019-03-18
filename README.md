@@ -1,5 +1,7 @@
 The DR-DOS/OpenDOS Enhancement Project
 
+(Please note that the links in this document no longer work)
+
 Many PC users in the world use DR-DOS because of its advanced features.
 In mid 2002, however, the development of DR-DOS seemed to have stopped and the
 last version had been released more than three years ago. Since there is no
