@@ -1,0 +1,167 @@
+7.01.07:
+- added FAT32 support to the BDOS loader to allow booting from FAT32 partitions
+- added support for category code 48h (FAT32) to generic ioctl function,
+  changed get and set subfunctions to use extended BPBs again, but only for
+  this category
+- fixed bug in device driver initialization code that called driver interrupt
+  routine without checking whether its offset had been changed by the strategy
+  routine, causing Himem64 to hang after unpacking
+- added DOS 7 system call int 21h/AH=73h, implemented sub function 7303h (Get
+  Extended Free Disk Space)
+- changed dir command to use the new free disk space routine when it is
+  available and kilobytes instead of bytes for large numbers
+- fixed some small Watcom C/C++ 11.0c compilation problems
+- fixed bugs in disk device driver that caused Get/Set Media routines to not
+  read/write the serial number and label correctly on FAT16 and LBA drives
+- fixed bug in Find First/Next Matching File functions that caused volume
+  labels not to be found when other attributes were also given
+- fixed bug in SynchroniseBuffers routine that sometimes caused data
+  inconsistensies between buffers and disk
+- restructured DR-DOS DDSC to make it more compatible with DOS 7 Extended DPB
+  structure
+- implemented function 7302h (Get Extended DPB)
+- added alternate implementation of the int 25h/26h absolute disk read/write
+  interface via function 7305h, for the few silly programs that try to use the
+  so-called "extended" interface without checking if it is present
+- changed the behaviour of functions 1Fh and 32h (Get DPB) to return error code
+  FFh (invalid drive) for FAT32 drives; again, this was needed because some
+  programs rely on this function to identify FAT32 drives
+- changed OEM version code in function 30h from 00h (PC DOS) to EEH (DR DOS),
+  changed true version as reported by function 3306h to 7.01, let SetVer
+  override this as well to make Scandisk activate its FAT32 functionality
+- added drive locking/unlocking functions to the disk device driver that fake
+  a successful operation to make Scandisk work again after version change
+- reduced maximum cluster size reported by function 36h for FAT32 partitions to
+  32K to improve compatibility with existing disk tools.
+- removed a rather dirty hack that was needed to work around a bug in the
+  DR-DOS 7.03 boot sector code
+- fixed bugs related to STACKS command
+- added code to allow buffers, files, fcbs, stacks and drive table to be loaded
+  in upper or high memory.
+- added new config.sys commands HIFILES, HIFCBS, HISTACKS and HILASTDRIVE to
+  load these data structures high even if DOS itself is loaded low
+- added support for function 3001h (Get Version Flag) which is needed by
+  Windows 3.x
+- worked around a bug in MASM that led to errors in the DR-DOS header which was
+  the reason why the taskswitcher refused to start
+- fixed bugs in command.com to make comparisons in batch files with quoted
+  strings work as expected
+- added support for environment and internal variables on the command line
+- changed function 49h (Free Memory) to merge adjacent free blocks after
+  freeing a memory block
+- fixed an overflow error that prevented DR-DOS from reading/writing files if
+  the seek position was larger than (partition_size modulo 4 GB)
+- made command.com stay resident even if not invoked with parameter /P when no
+  other primary shell is installed, removed default parameters A: /P
+- changed DEVICE command to not insert unnessary spaces into device driver's
+  command line
+- added new experimental config.sys command VERSION=x.x to allow to change the
+  global version setting
+- added support for block device drivers that are loaded with INSTALL in
+  config.sys by increasing the number of drive letters available at boot time
+  and copying the temporary logical drive table into the final one
+- made some arrays in command.com static to keep nested IF commands in batch
+  files from overflowing the stack
+- added experimental support for drives with 128 KB cluster size (sectors per
+  cluster in boot sector = 0)
+- added new code to allow DDSC structures to be relocated to upper or high
+  memory, added new config.sys command DDSCS=HIGH,UMB to configure this feature
+  (default is DDSCS=LOW)
+- added new code to also allow the DOS data segment to be relocated to upper
+  memory, added new config.sys command DOSDATA=UMB to activate this (default is
+  DOSDATA=LOW)
+- added new code to allow the Extended BIOS Data Area to be relocated to low or
+  upper memory if for some reason the memory manager fails to do this, added
+  new config.sys command XBDA=LOW,UMB
+- fixed a bug in the FAT32 FSInfo block handling routines that manifested after
+  the DDSC relocation feature had been introduced
+- fixed age-old OpenDOS bug that caused wrong value to be used for code segment
+  padding which made DR-DOS hang during boot when loaded low on some machines
+- made command.com ignore leading semicolons in %PATH% environment variable
+- changed location of static arrays in command.com to another segment to work
+  around what seems to be a bug in TaskMgr
+- changed boot code so that DR-DOS will look for ibmdos.com and config.sys on
+  the correct drive when booting from a second primary partition
+- changed history and deblock buffer setup routines to use upper mem for these
+  buffers if available
+- changed FILES/FCBS to use upper memory by default if available
+- changed number of internal file handles in the DOS header to four, remooved
+  now obsolete command line buffer size hack
+- changed floppy disk BPB table in init to use old-style BPB structure
+- fixed command.com stack corruption problem when PATH is longer than 256 bytes
+- fixed yet another bug from OpenDOS times that caused the RENAME command to
+  corrupt the command.com stack if the new filename was longer than eight bytes
+- fixed a stupid bug present since v7.01.04 that referenced some internal LBA
+  variables via the wrong segment register, causing FORMAT to crash upon
+  completion in recent versions with DOSDATA relocation
+- introduced two new config.sys commands INSTALLLAST and HIINSTALLLAST that
+  load programs after the DOSDATA segment relocation to work around problems
+  with older programs that are incompatible with this feature when INSTALLed
+- enhanced the VERSION=x.xx,y.yy config.sys command to also allow setting the
+  True DOS Version as reported by function 3306h
+- fixed code in command.com module cmdlist to work with Watcom C; changed
+  default compiler for cmdlist from Borland C to Watcom C
+- added support for DR-DOS 7.03 internal vars %_YEAR%, %_MONTH%, %MOY%, %_DAY%,
+  %DOM%, %_DOW%, %_DOWI%, %_HOUR%, %_MINUTE%, %_SECOND%, %ERRORLEVEL%,
+  %ERRORLVL%, %_ROWS%, %_COLUMNS%, %_COUNTRY% and %_CODEPAGE% to command.com
+- changed the names for the kernel files to DRBIO.SYS and DRDOS.SYS; changed
+  official name to "Enhanced DR-DOS"
+- enhanced IF statement to also allow letters instead of numbers in ERRORLEVEL
+  tests, i.e. IF ERRORLEVEL A translates into IF ERRORLEVEL 1
+
+7.01.06:
+- added support for FAT32 partition types and boot records to disk device
+  driver
+- expanded sector numbers in buffer management routines from 24 to 32 bit to
+  allow partitions larger than 8 GB
+- added FAT32 specific entries to DR-DOS file system structures
+- rewrote most file system routines to cope with 32-bit cluster numbers and
+  dynamic root directories (FAT32)
+- added support for FAT32 file system info block to store free disk space
+  to speed up disk access
+- changed the free disk space routine to use dynamic cluster sizes on FAT32
+  partitions to report free space more accurately
+- added a routine to command.com to display large numbers with thousands
+  delimiters, changed dir command to use it
+- fixed bugs in the boot routine to allow booting from 64 KB cluster
+  partitions
+- fixed bug that caused command.com not to terminate the PSP chain at the
+  master PSP, leading to all kinds of problems with the environment space
+- fixed bug in dir command that caused the free disk space on partitions with
+  64 KB clusters to be displayed as zero
+- fixed bug in the memory allocation routine that would cause the install
+  command to crash sometimes when upper memory was present
+- fixed bug in LBA routines that caused writing problems on some systems, this
+  may also speed up writing on other systems
+- increased heap space in command.com to prevent corruption of command line
+  arguments while processing deeply nested batch files
+- fixed bug that sometimes caused XMSDSK to corrupt the last memory block
+
+7.01.05:
+- some preliminary changes for 32-bit file system support
+- added support for 4 GB FAT16 partitions (64 KB cluster size)
+
+7.01.04:
+- added routines to convert LBA values to CHS and vice versa
+- rewrote the partition registering routine to use the LBA values in the
+  partition tables instead of the obsolete CHS values, disabled old code
+- added int 13 extensions (LBA) support to the partition login and track r/w
+  routines
+- added support for partition type 0eh (FAT16B LBA)
+
+7.01.03:
+- added a hex value output routine for debugging purposes
+- changed the behavior of the partition registering routine to not follow loops
+  in the partition tables
+
+7.01.02:
+- changed some text strings to reflect the new version number
+- slightly changed the structure of the start-up message routine
+- added support for ExtendedX (type 0fh) partitions
+- added a routine that checks for and displays the version number of extended
+  int 13 (LBA) support
+- some preliminary changes for LBA support
+
+7.01.01 (original release):
+- fixed the compilation to work with MASM 6.0b and Watcom C/C++ 10.0a
+- no user-visible changes

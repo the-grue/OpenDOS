@@ -1,0 +1,355 @@
+diff -u -P -r dr70104/ibmbio/biosinit.a86 dr70105/ibmbio/biosinit.a86
+--- dr70104/ibmbio/biosinit.a86	2002-07-16 13:04:04.000000000 +0000
++++ dr70105/ibmbio/biosinit.a86	2003-02-21 15:10:32.000000000 +0000
+@@ -117,7 +117,7 @@
+ 		db	'XXXX-0000-987654321X '
+ 
+ 		db	'Patches to original OpenDOS source code '
+-		db	'Copyright (c) 2002 Udo Kuhnt'
++		db	'Copyright (c) 2002-2003 Udo Kuhnt'
+ 
+ 
+ 	Public	biosinit
+diff -u -P -r dr70104/ibmbio/biosmsgs.asm dr70105/ibmbio/biosmsgs.asm
+--- dr70104/ibmbio/biosmsgs.asm	2003-01-25 19:44:52.000000000 +0000
++++ dr70105/ibmbio/biosmsgs.asm	2003-02-21 15:10:56.000000000 +0000
+@@ -27,7 +27,7 @@
+ 	public	_starting_dos_msg
+ 	public	starting_dos_msg
+ starting_dos_msg	label	byte
+-_starting_dos_msg	db	CR, LF, "Starting Caldera OpenDOS 7.01.04", CR, LF, NUL
++_starting_dos_msg	db	CR, LF, "Starting Caldera OpenDOS 7.01.05", CR, LF, NUL
+ 	public	_lba_supp_msg
+ 	public	lba_supp_msg
+ lba_supp_msg		label	byte
+diff -u -P -r dr70104/ibmbio/disk.asm dr70105/ibmbio/disk.asm
+--- dr70104/ibmbio/disk.asm	2003-02-11 21:51:30.000000000 +0000
++++ dr70105/ibmbio/disk.asm	2003-02-12 19:56:22.000000000 +0000
+@@ -913,7 +913,7 @@
+ 	mov	dx,0			; divide high word of LBA block number
+ 	mov	ax,word ptr [si+10]
+ 	div	max_sect
+-	push	ax			; high word of dividend
++	push	ax			; high word of quotient
+ 	mov	ax,word ptr [si+8]	; divide low word & remainder
+ 	div	max_sect
+ 	mov	cx,dx			; remainder = sector number
+diff -u -P -r dr70104/ibmdos/bdevio.a86 dr70105/ibmdos/bdevio.a86
+--- dr70104/ibmdos/bdevio.a86	1997-04-16 15:42:18.000000000 +0000
++++ dr70105/ibmdos/bdevio.a86	2003-02-21 15:52:38.000000000 +0000
+@@ -159,7 +159,7 @@
+ 
+ nfats		dw	0		; # FAT's (WORD is handier)
+ nfatrecs	dw	0		; # sectors per FAT (accurate version)
+-clsize		dw	0		; cluster size in bytes
++clsize		dw	0,0		; cluster size in bytes
+ secperclu	dw	0		; # sectors per cluster
+ dirperclu	dw	0		; # dir enrties in subdir
+ 
+@@ -259,6 +259,7 @@
+ 	public	select_logical_drv
+ 	public	select_physical_drv
+ 	public 	write_block
++	public	div32
+ 
+ eject
+ 
+@@ -464,17 +465,37 @@
+ 	mov	byteoff,ax		; copy position to local variables
+ 	mov	ax,es:DHNDL_POSHI[bx]
+ 	mov	byteoff+WORD,ax
+-	mov	cx,clsize
+-	mov	ax,lastcl
+-	mul	cx			; DX:AX = maximum size of disk
++;	mov	cx,clsize
++;	mov	ax,lastcl
++;	mul	cx			; DX:AX = maximum size of disk
++	push	word ptr clsize+2
++	push	word ptr clsize
++	xor	ax,ax
++	push	ax
++	push	word ptr lastcl
++	sub	sp,8
++	call	mul32			; compute maximum size of disk
++	pop	ax
++	pop	dx
++	add	sp,12
+ 	sub	ax,byteoff
+ 	sbb	dx,byteoff+WORD		; beyond this we can't go
+ 	 jc	fdrw_p30
+-	mov	ax,byteoff		; DX:AX = current file size
+-	mov	dx,byteoff+WORD
+-	div	clsize
+-	mov	blkidx,ax		; save it for later
+-	mov	blkoffset,dx		; DX = offset within cluster
++;	mov	ax,byteoff		; DX:AX = current file size
++;	mov	dx,byteoff+WORD
++;	div	clsize
++;	mov	blkidx,ax		; save it for later
++;	mov	blkoffset,dx		; DX = offset within cluster
++	push	word ptr byteoff+2	; current file size
++	push	word ptr byteoff
++	push	word ptr clsize+2
++	push	word ptr clsize
++	sub	sp,8			; reserve space on stack
++	call	div32
++	pop	word ptr blkoffset	; offset within cluster
++	add	sp,2			; skip high word
++	pop	word ptr blkidx		; save it for later
++	add	sp,10			; clean up stack
+ 	clc				; theoretically possible
+ fdrw_p30:
+ 	ret
+@@ -556,7 +577,17 @@
+ 	mov	dx,byteoff+2
+ 	add	ax,fdrwcnt		; AX,DX = offset after r/w if success
+ 	adc	dx,0			; add offset from lower 16 bits
+-	div	clsize			; AX whole blocks required
++;	div	clsize			; AX whole blocks required
++	push	dx
++	push	ax
++	push	word ptr clsize+2
++	push	word ptr clsize
++	sub	sp,8
++	call	div32
++	pop	dx
++	add	sp,2
++	pop	ax
++	add	sp,10
+ 	test	dx,dx			; any remainder ?
+ 	 jz	fdw_e05			; yes, we have a partial block
+ 	inc	ax			; round up blocks required
+@@ -623,12 +654,23 @@
+ ;	PBLOCK = sector containing current filepos
+ ;	POFFSET = offset within sector (reflected in ZF)
+ ;
+-	mov	ax,byteoff		; where are we now ?
+-	mov	dx,byteoff+WORD
+-	div	clsize
+-	mov	blkidx,ax		; save cluster
+-	mov	blkoffset,dx		;  and offset within it
++;	mov	ax,byteoff		; where are we now ?
++;	mov	dx,byteoff+WORD
++;	div	clsize
++;	mov	blkidx,ax		; save cluster
++;	mov	blkoffset,dx		;  and offset within it
++	push	word ptr byteoff+2	; where are we now ?
++	push	word ptr byteoff
++	push	word ptr clsize+2
++	push	word ptr clsize
++	sub	sp,8			; reserve space on stack for result
++	call	div32
++	pop	word ptr blkoffset	; save cluster and offset within it
++	add	sp,2
++	pop	word ptr blkidx
++	add	sp,10			; clean up stack
+ 	les	bx,current_dhndl
++	mov	ax,blkidx
+ 	cmp	ax,es:DHNDL_IDX[bx]	; do we know this block ?
+ 	 jb	fdrw_seek10		; we can't go backwards, use 1st block
+ 	mov	cx,es:DHNDL_BLK[bx]	; get last index block
+@@ -729,15 +771,37 @@
+ 	sub	cx,blkoffset		; CX = bytes remaining in this block
+ 	sub	ax,cx			; if wholly containined within block
+ 	 jbe	direct_rw10		; then leave it alone
+-	div	clsize			; else get # of extra clusters
++;	div	clsize			; else get # of extra clusters
++	push	cx
++	push	dx
++	push	ax
++	push	word ptr clsize+2
++	push	word ptr clsize
++	sub	sp,8
++	call	div32
++	pop	dx
++	add	sp,2
++	pop	ax
++	add	sp,10
++	pop	cx
+ 	xchg	ax,dx			; DX = clusters, AX = remainder
+ 	or	ax,ax			; round up if any remainder
+ 	 jz	direct_rw10		; skip if even number
+ 	inc	dx			; else one more cluster
+ direct_rw10:				; DX = # of contiguous clusters req'd
+ 	call	check_cont		; check how many contiguous blocks
+-	mov	ax,clsize		; space = cnt * dpbptr->clsize;
+-	mul	cx			; AX:DX = # of bytes transferrable
++;	mov	ax,clsize		; space = cnt * dpbptr->clsize;
++;	mul	cx			; AX:DX = # of bytes transferrable
++	push	word ptr clsize+2
++	push	word ptr clsize
++	xor	ax,ax
++	push	ax
++	push	cx
++	sub	sp,8
++	call	mul32
++	pop	ax
++	pop	dx
++	add	sp,12
+ 	sub	ax,blkoffset		; BX = skipped bytes in 1st cluster
+ 	sbb	dx,0
+ 					; AX:DX = max # of bytes transferrable
+@@ -1168,14 +1232,17 @@
+ 	mov	cx,LOCAL_DDSC_LEN
+ 	rep	movsb			; make a local copy of interesting bits
+ 	push es ! pop ds		; DS=ES=local data segment
+-	mov	ax,psecsiz		; now initialise some other vaiiables
+-	mov	cl,clshf
+-	shl	ax,cl			; AX = bytes per cluster
+-	mov	clsize,ax
++;	mov	ax,psecsiz		; now initialise some other vaiiables
++;	mov	cl,clshf
++;	shl	ax,cl			; AX = bytes per cluster
++;	mov	clsize,ax
+ 	xor	ax,ax
+ 	mov	al,clmsk
+ 	inc	ax			; AX = sectors per cluster
+ 	mov	secperclu,ax
++	mul	psecsiz			; DX:AX byte size of cluster
++	mov	clsize,ax
++	mov	clsize+2,dx
+ 	mov	al,byte_nfats		; AX = number of FATs
+ 	mov	nfats,ax		;  (it's handier as a word
+ 	mov	ax,diradd		; number of FAT records can be
+@@ -1185,7 +1252,8 @@
+     mov nfatrecs,ax     
+ 	mov	cx,FCBLEN
+ 	mov	ax,clsize		; convert from cluster size
+-	xor	dx,dx			;  to number of dir entries
++;	xor	dx,dx			;  to number of dir entries
++	mov	dx,clsize+2		;  to number of dir entries
+ 	div	cx			;  per cluster - handy for
+ 	mov	dirperclu,ax		;  subdirectories
+ 	mov	ax,FAT12
+@@ -1470,5 +1538,86 @@
+ 	adc	dx,0
+ 	ret
+ 
++div32:					; 32-bit division
++;--------
++; On Entry:
++;	32-bit dividend & divisor on stack
++;	space for 32-bit quotient & remainder reserved on stack
++;	SP-16
++; On Exit:
++;	32-bit quotient & remainder on stack
++;	SP-16
++; Modified registers:
++;	AX,CX,DX,BP
++	mov	bp,sp			; base address of temporary variables
++	add	bp,2
++	xor	ax,ax			; clear work registers
++	xor	dx,dx
++	mov	cx,32			; 32 bits
++div32_loop:
++	shl	word ptr 4[bp],1	; multiply quotient with two
++	rcl	word ptr 6[bp],1
++	shl	word ptr 12[bp],1	; shift one bit from dividend
++	rcl	word ptr 14[bp],1
++	rcl	ax,1			; to work registers
++	rcl	dx,1
++	cmp	dx,10[bp]		; compare high word with divisor
++	 jb	div32_2
++	 ja	div32_1
++	cmp	ax,8[bp]		; compare low word
++	 jb	div32_2
++div32_1:
++	or	word ptr 4[bp],1	; divisor fits one time
++	sub	ax,8[bp]		; subtract divisor
++	sbb	dx,10[bp]
++div32_2:
++	loop	div32_loop		; loop back if more bits to shift
++	mov	[bp],ax			; save remainder onto stack
++	mov	2[bp],dx
++	ret
++
++mul32:					; 32-bit multiplication
++;--------
++; On Entry:
++;	32-bit factors on stack
++;	space for 64-bit product reserved on stack
++;	SP-16
++; On Exit:
++;	64-bit product on stack
++;	SP-16
++;	Carry flag set if result does not fit in double word
++; Modified registers:
++;	AX,DX,BP,SP
++	mov	bp,sp			; base address of temporary variables
++	add	bp,2
++	mov	ax,10[bp]		; multiply high word of factors
++	mul	word ptr 14[bp]
++	mov	4[bp],ax		; store result
++	mov	6[bp],dx
++	mov	ax,10[bp]		; multiply high word of first factor with low word of second
++	mul	word ptr 12[bp]
++	mov	2[bp],ax		; add result to previous
++	add	4[bp],dx
++	adc	word ptr 6[bp],0
++	mov	ax,8[bp]		; multiply low word of first factor with high word of second
++	mul	word ptr 14[bp]
++	add	2[bp],ax		; add result to previous
++	adc	4[bp],dx
++	adc	word ptr 6[bp],0
++	mov	ax,8[bp]		; multiply low word of first factor with low word of second
++	mul	word ptr 12[bp]
++	mov	[bp],ax			; add result
++	add	2[bp],dx
++	adc	word ptr 4[bp],0
++	adc	word ptr 6[bp],0
++	cmp	word ptr 4[bp],0	; 64-bit result?
++	 jnz	mul32_1			; yes
++	cmp	word ptr 6[bp],0
++	 jz	mul32_2			; no
++mul32_1:
++	stc				; yes, set carry flag to indicate this
++mul32_2:
++	ret
++
+ 
+ 	end
+diff -u -P -r dr70104/ibmdos/dirs.a86 dr70105/ibmdos/dirs.a86
+--- dr70104/ibmdos/dirs.a86	1997-04-16 15:31:38.000000000 +0000
++++ dr70105/ibmdos/dirs.a86	2003-02-20 00:03:26.000000000 +0000
+@@ -109,6 +109,7 @@
+ 	extrn	update_dir:NEAR
+ 	extrn	update_fat:NEAR
+ 	extrn	zeroblk:near
++	extrn	div32:near
+ 
+ eject
+ 
+@@ -249,7 +250,19 @@
+ 	xchg	ax,cx		; keep subdir cluster in CX
+ 	mov	ax,FCBLEN	; AX = size of dir entry
+ 	mul	bx		; DX:AX = offset of set entry we want
+-	div	clsize		; AX = # clusters to skip, DX = offset in cluster
++;	div	clsize		; AX = # clusters to skip, DX = offset in cluster
++	push	cx
++	push	dx
++	push	ax
++	push	word ptr clsize+2
++	push	word ptr clsize
++	sub	sp,8
++	call	div32
++	pop	dx
++	add	sp,2
++	pop	ax
++	add	sp,10
++	pop	cx
+ 	xchg	ax,dx		; DX = # to skip, AX = offset in cluster
+ 	xchg	ax,cx		; AX = start of chain, CX = offset in cluster
+ 	xchg	bx,cx		; BX = offset in cluster, CX = dcnt
+diff -u -P -r dr70104/ibmdos/utils.fdo dr70105/ibmdos/utils.fdo
+--- dr70104/ibmdos/utils.fdo	1997-04-16 17:09:28.000000000 +0000
++++ dr70105/ibmdos/utils.fdo	2003-02-21 15:09:36.000000000 +0000
+@@ -2238,6 +2238,9 @@
+ 
+ join_name	db	'd:\filename.ext',0
+ 
++		db	'Patches to original OpenDOS source code '
++		db	'Copyright (c) 2002-2003 Udo Kuhnt'
++
+ BDOS_CODE	cseg
+ 
+ 	Public	mv_join_root

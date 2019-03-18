@@ -25,7 +25,7 @@ To use the supplied patches, you need the following:
 - the development tools MASM 6.0b and Watcom C/C++ 10.0a (other versions may
   work as well, but this has not been tested)
 
-Note that the source code patches are not cumulative, meaning that you have to
+Note that the source code patches are cumulative, meaning that you have to
 apply the earlier patches to the source code as well, with the exception of
 Work-In-Progress (WIP) and Release Candidate (RC) versions; these refer to the
 previous main release version.
@@ -51,8 +51,9 @@ Due to the experimental nature of these patches and lack of time on my side, I
 cannot provide extensive technical support for them. However, if you find a bug
 that I have not been aware of, or if you want to tell me something that you
 think I should know, you should post a message in
-- the Enhanced DR-DOS forum at http://www.drdosprojects.de/forum/drp_forum/
-which I usually check at least once in a few days. This forum is also an
+- the Enhanced DR-DOS forum at http://www.senac.com/forums/16612/ or
+- the German DR-DOS forum at http://www.senac.com/forums/11868/
+which I usually check at least once in a few days. These forums are also an
 excellent place to ask any other DR-DOS related questions or discuss any DR-DOS
 topics with other members of the DR-DOS community.
 

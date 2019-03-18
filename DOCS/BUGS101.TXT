@@ -1,0 +1,9 @@
+There is currently one known bug in the DR-DOS kernel which apparently plagues
+all versions from 7.01 to 7.03. This bug prevents DR-DOS from booting if there
+are very large FAT32 partitions on any hard disks in the system; it will simply
+hang. I do not know what causes this problem, but I will probably fix it in one
+of the next patches. Until then, as a work-around, use DR-DOS 7.03 and set the
+type of any extended partitions that point to these FAT32 partitions to 0fh.
+Since DR-DOS 7.03 does not recognize this type at boot time, it will simply not
+register these partitions. This will not affect the DRFAT32 driver, so you can
+still work with your FAT32 partitions normally.

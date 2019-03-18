@@ -1,0 +1,114 @@
+diff -u -P -r dr70102/ibmbio/biosmsgs.asm dr70103/ibmbio/biosmsgs.asm
+--- dr70102/ibmbio/biosmsgs.asm	2002-07-16 12:46:00.000000000 +0000
++++ dr70103/ibmbio/biosmsgs.asm	2003-01-13 10:26:56.000000000 +0000
+@@ -27,7 +27,7 @@
+ 	public	_starting_dos_msg
+ 	public	starting_dos_msg
+ starting_dos_msg	label	byte
+-_starting_dos_msg	db	CR, LF, "Starting Caldera OpenDOS 7.01.02", CR, LF, NUL
++_starting_dos_msg	db	CR, LF, "Starting Caldera OpenDOS 7.01.03", CR, LF, NUL
+ 	public	_lba_supp_msg
+ 	public	lba_supp_msg
+ lba_supp_msg		label	byte
+diff -u -P -r dr70102/ibmbio/disk.asm dr70103/ibmbio/disk.asm
+--- dr70102/ibmbio/disk.asm	2002-07-16 12:43:56.000000000 +0000
++++ dr70103/ibmbio/disk.asm	2003-01-17 14:15:16.000000000 +0000
+@@ -173,6 +173,7 @@
+ 	extrn	req_off:word
+ 	extrn	req_seg:word
+ 	extrn	output_msg:near
++	extrn	output_hex:near
+ 
+ 
+ udsc_root	label	dword
+@@ -2190,6 +2191,8 @@
+ ver_21		db	"2.1/EDD-1.1",CR,LF,NUL
+ ver_30		db	"EDD-3.0",CR,LF,NUL
+ 
++lastpart	dw	0		; last checked partition
++
+ hard_init:	; setup all hard disk units
+ ;---------
+ ;	mov	log_flag,LOG_PRIM	; log in primary only initially
+@@ -2210,6 +2213,7 @@
+ 	xchg	ax,cx			; CX = # of hard disks
+ 	mov	dl,80h			; start with first hard disk
+ hardi1:
++	mov	lastpart,0
+ 	pushx	<cx, dx>		; save drive count, physical drive
+ 	mov	ah,ROS_LBACHK		; int 13 extensions available?
+ 	mov	bx,55aah
+@@ -2358,9 +2362,18 @@
+ log_h6b:
+ 	mov	dh,1[si]		; get head # for next table
+ 	mov	cx,2[si]		; get cylinder, sector for next table
++	xchg	ch,cl			; compute 10-bit cylinder number
++	rol	ch,1
++	rol	ch,1
++	and	cx,3ffh
++	cmp	cx,lastpart		; check for loops/partition out of bounds
++	jng	log_h7
++	mov	lastpart,cx		; store cylinder number for comparison
++	mov	cx,2[si]
+ 	jmp	log_h1			; read & scan next partition table
+ 
+ log_h7:					; entry not an extended partition
++	mov	cx,2[si]
+ 	add	si,16			; next partition table entry
+ 	cmp	si,CG:local_buffer+IDOFF; all partitions checked?
+ 	 jb	log_h6			; loop back if more
+diff -u -P -r dr70102/ibmbio/init.asm dr70103/ibmbio/init.asm
+--- dr70102/ibmbio/init.asm	2002-07-16 00:08:00.000000000 +0000
++++ dr70103/ibmbio/init.asm	2003-01-09 01:16:56.000000000 +0000
+@@ -48,6 +48,7 @@
+ 	include	BPB.EQU
+ 	include	UDSC.EQU
+ 	include	DRIVER.EQU
++	include KEYS.EQU		; common key definitions
+ 
+ ; IBM AT Hardware equates
+ 
+@@ -865,6 +866,43 @@
+ 	 jnz	output_msg10
+ 	ret
+ 
++	public	output_hex
++output_hex:
++;----------------
++; On Entry:
++;	dx = 2 byte hex value
++; On Exit:
++;	None
++; Used Regs:
++;	ax,bx,cx,dx,si
++	mov	cx,4
++	mov	ah,0eh
++	mov	bx,7
++output_hex10:
++	mov	al,dh
++	push	cx
++	mov	cl,4
++	shr	al,cl
++	pop	cx
++	and	al,0fh
++	cmp	al,09h			; greater 0-9?
++	jg	output_hex20
++	add	al,30h
++	jmp	output_hex30
++output_hex20:
++	add	al,37h
++output_hex30:
++	int	VIDEO_INT
++	push	cx
++	mov	cl,4
++	shl	dx,cl
++	pop	cx
++	loop	output_hex10
++	mov	si,CG:output_hex40
++	call	output_msg
++	ret
++output_hex40	db	CR,LF,NUL	; end of string
++
+ get_boot_options:
+ ;----------------
+ ; On Entry:

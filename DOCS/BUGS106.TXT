@@ -1,0 +1,48 @@
+Warning: Beginning with version 7.01.04, DR-DOS is able to use the LBA BIOS
+functions to access hard disk partitions outside the 7.8 GB limit defined by
+the old CHS (cylinder, head & sector) system. This is no problem for any disk
+tools that use DOS functions to access these partitions, however, there are
+many old tools that are not LBA-compliant which use low-level BIOS calls to
+access hard disks. When used on partitions that are not within the space
+accessible via CHS these tools could possibly write data to the wrong sectors
+on the hard disk and thus cause severe damage. This is not a bug in DR-DOS, but
+a limitation of these tools. Some of the disk tools that are included in the
+distributions of DR-DOS 7.0x like fdisk, format, diskopt, etc. may also fall
+into this category. Until they have been tested on LBA partitions and it has
+been found that they are safe to use, do not use them without making a backup
+of your hard disk first.
+
+Warning: Beginning with version 7.01.05, DR-DOS supports FAT16 partitions with
+a cluster size of 64 KB. This feature has been tested and found to be working.
+However, until someone has done extensive tests and it has been found that it
+is generally safe to use, use precautions before using it on partitions that
+contain valuable data. Also, please note that many disk tools do not expect to
+see this feature on a DOS based machine, so they most likely do not support it.
+Windows NT and FreeDOS support it, so tools written for these operating systems
+should be safe to use.
+
+Update: Chkdsk seems to work with both LBA partitions and 64K clusters.
+
+In version 7.01.06 I have introduced support for the FAT32 file system to
+DR-DOS. This is quite an advancement and was requested by many users, but has
+also led to a number of problems. Some of these will probably be fixed in one
+of the next patches, but to others there is currently no simple solution.
+- DR-DOS reports the free space on a partition in clusters; this value is per
+  definition a 16-bit number, so this does not work on FAT32 partitions. I have
+  tried to compensate this problem by making this function use dynamic cluster
+  sizes to report the free space as accurately as possible, however, on FAT32
+  partitions this value is not always exact. Also, there is no way to report
+  more than 4 GB of free disk space with this function without seriously
+  compromising the compatibility with existing software.
+- The disk utilities Delwatch and Superstor/Stacker do not support 32-bit
+  cluster numbers and thus will not work on FAT32 partitions, and there is a
+  good chance that support for them is broken on FAT12/16 as well. I would
+  generally advise against using them until someone has tested them and it has
+  been found that they are safe to use with this patch.
+- Several disk tools that were written for MS-DOS 7 currently do not work on
+  FAT32 partitions in DR-DOS because they either require the MS-DOS 7 FAT32 API
+  to work correctly or they simply disable FAT32 support if they do not detect
+  MS-DOS 7. A fix will require writing new system calls, so it will take some
+  time.
+- The DR-DOS BDOS loader currently does not support booting from FAT32 drives;
+  I will probably fix this in one of the next patches.

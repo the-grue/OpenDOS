@@ -1,0 +1,24 @@
+To install the binaries, create a directory on your hard disk and copy the
+archive there. You can then unpack it with unzip32 or any other tool that can
+unpack ZIP archives. From this directory, you can either use the makeboot batch
+file to create a boot disk, e.g. makeboot a: will make a boot disk of the disk
+in drive a:, or you can just copy the three files ibmbio.com, ibmdos.com and
+command.com on any existing DR-DOS 7 boot disk. You can also copy these files
+to you hard disk, but this is not recommended because if your PC fails to boot
+due to a bug (see bugs.txt), you will not be able to use it until you reinstall
+your previous operating system. Besides, depending on how you have partitioned
+your hard disk, DR-DOS may be unable to boot from the selected partition.
+
+To compile the source, create a directory and copy dossrc.zip and any patches
+you want to use there, then unzip the files with unzip32 or any other tool that
+can unpack ZIP archives. Make sure you have the patch utility in your path,
+then apply the patches by typing "patch -p1 <dr7010x.dif", where x is the minor
+version number, up to the required number in consecutive order. Before you can
+compile the source, you have to edit the make.bat file in the directories
+ibmbio, ibmdos and command to adjust the locations of your your MASM and Watcom
+files, if necessary. Then you can run make.bat in these directories to compile
+the source code. The resulting binaries will be in the sub directory "bin".
+To boot the compiled version of DR-DOS, the files ibmbio.com, ibmdos.com and
+command.com have to be copied on a bootable DR-DOS disk. If you do not have
+one, you will find a disk image in the archives containing the pre-compiled
+binaries.

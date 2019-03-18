@@ -1,0 +1,46 @@
+New or changed commands:
+
+In Config.sys:
+
+ HIFILES/HIFCBS	moves file handles and file control blocks (FCBs) to upper or
+		high memory if available
+ HISTACKS	moves interrupt stacks to upper or high memory
+ HILASTDRIVE	moves drive table to upper or high memory
+ DDSCS=UMB/HIGH/HIGH,UMB
+		moves drive scriptor tables (DDSCS) to upper or high memory;
+		default is DDSC=LOW
+ DOSDATA=UMB	moves main DOS data segment to upper memory; default is LOW
+ XBDA=LOW/UMB/LOW,UMB
+		relocates extended BIOS data area (XBDA) to low base or upper
+		memory if the memory manager has not already done this
+ VERSION=x.xx[,y.yy]
+		sets the DOS version (int 21h/ah=30h) and optionally the true
+		DOS version (int 21h/ax=3306h) to be reported to programs
+ [HI]INSTALLLAST
+		works like INSTALL/HIINSTALL, but loads program after the DOS
+		data segment relocation
+
+ [HI]BUFFERS	can now also use upper memory if available
+ FILES/FCBS	uses upper memory by default if available
+ LASTDRIVE	uses upper memory by default if available
+ HISTORY	uses upper memory by default if available
+
+New or changed system calls:
+
+ int 21h/ax=7302h	Get Extended Drive Parameter Block
+	/ax=7303h	Get Extended Free Disk Space
+	/ax=7305h	alternative Absolute Disk Read/Write Interface
+	/ax=3001h	Get Version Flag
+
+ int 21h/ax=440dh	(Generic IOCTL) now supports category code 48h (FAT32)
+			stubs have been added for sub functions 4ah, 4bh, 6ah
+			and 6bh	(lock/unlock logical/physical drive) that fake
+			successful operation
+	/ah=1fh/32h	(Get DPB) no longer returns DPB for FAT32 drives
+	/ah=30h		(Get DOS Version) now reports OEM code eeh (DR DOS)
+			instead of 00h (PC DOS)
+	/ax=3306h	(Get True DOS Version) now returns 7.01 instead of
+			6.00, configurable by SETVER or VERSION command
+	/ah=36h		(Get Free Disk Space) no longer reports cluster sizes
+			>32K on FAT32 partitions
+	/ah=49h		(Free Memory) merges adjacent free blocks after freeing

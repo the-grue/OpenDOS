@@ -1,0 +1,4355 @@
+diff -u -P -r dr70106/command/batch.c dr70107/command/batch.c
+--- dr70106/command/batch.c	1997-04-16 21:39:50.000000000 +0000
++++ dr70107/command/batch.c	2005-02-18 02:52:48.000000000 +0000
+@@ -282,13 +282,15 @@
+ GLOBAL BOOLEAN getcmd(line)		/* read command line */
+ BYTE *line;
+ {
+-	BYTE *s;
++	BYTE *s,*s1;
+ 	BOOLEAN quote = FALSE;
+ 	BOOLEAN	cancel_prompt = FALSE;
+ #if defined(DOSPLUS)
+ 	WORD	i;
+ 	BYTE	cmd_name[16];
+ #endif
++	BYTE envvar[128];
++	BYTE varbuf[128];
+ 
+ 	back_flag = FALSE;		/* Disable BackGround Processing*/
+ 
+@@ -396,6 +398,36 @@
+ 	    if(*s == '"')		/* Check for a " character and  */
+ 		quote = !quote; 	/* update the flag correctly	*/
+ 
++	    if (*s=='%')
++	      if (*(s+1)=='%')
++		s++;
++	      else {
++		s1=s+1;
++		i=0;
++		envvar[i]='\0';
++		while (*s1)
++		  if (*s1=='%')
++		    if (*(s1+1)=='%') {
++		      s1++;
++		      envvar[i++]=*s1++;
++		    }
++		    else {
++		      envvar[i]='\0';
++		      strcat(envvar,"=");
++		      s=s1+1;
++		      strupr(envvar);
++		      if (env_scan(envvar,varbuf))
++			if (novell_extension(envvar,varbuf))
++			  break;
++		      s1=varbuf;
++		      while (*s1)
++			*line++=*s1++;
++		    }
++		  else {
++		    envvar[i++]=*s1++;
++		  }
++	      }
++
+ #if !defined(DOSPLUS)
+ 	    if(*s == ESC_CHAR &&	/* If the Escape character has  */
+ 	       !quote &&		/* been specified then do not	*/
+@@ -752,7 +784,7 @@
+ 	hp_size = heap() - hp_start;
+ 
+ 	i = (sizeof(BCONTROL) + hp_size + 15)/16;
+-	mem_alloc(&bc, &i, i, i);	/* allocate new batch structure */
++	mem_alloc((BYTE FAR * NEAR *)&bc, &i, i, i);	/* allocate new batch structure */
+ 	
+ 	if (i == 0) {			/* if we can't allocate one	*/
+ 	    longjmp(break_env, IA_HEAP);/* then pretend heap has run out*/
+@@ -810,7 +842,7 @@
+ 	forptr = batch->fcontrol;	/* Restore the previous for	*/
+ 	for_flag = (BOOLEAN) forptr;	/*  control structures 		*/
+ 	batch = batch->bcontrol;	/* restore ptr to previous batch */
+-	mem_free(&bc);			/* free up batch memory */
++	mem_free((BYTE FAR * NEAR *)&bc);			/* free up batch memory */
+ #if defined(CDOSTMP)
+ 	ptr = MK_FP(pd->P_PSP, TmpPspBatchSeg);
+ 	*ptr = (UWORD)(((ULONG)batch) >> 16);
+@@ -1400,6 +1432,7 @@
+         WORD	attr;
+ 	UWORD   userid;
+ 	LONG	val1,val2;
++	BYTE	quoteflag;
+ 
+         cmd=*cptr;
+         not = cond = NO;			/* Initialise the Flags     */
+@@ -1443,13 +1476,16 @@
+ 		    cmd++;
+ 		}
+ 
+-		if(!isdigit(*cmd)) {		/* SYNTAX error if the	    */ 
+-		    syntax();			/* first character is not a */
++		if(!isdigit(*cmd) && !isletter(*cmd)) {	/* SYNTAX error if the	    */ 
++		    syntax();				/* first character is not a */
+ 		    return FALSE;			/* digit.		    */
+ 		}
+ 
+-		while(isdigit(*cmd))
++		if (isdigit(*cmd))
++		  while(isdigit(*cmd))
+ 		    level = level * 10 + (*cmd++ - '0');
++		else
++		  level=tolower(*cmd++)-'a'+1;
+ 
+ 		level = level & 0x00FF;
+ 
+@@ -1580,10 +1616,11 @@
+ 	    default:
+ 		str1 = cmd;			/* Extract String 1	    */
+ 
+-		while ((!is_blank(cmd)) && (*cmd != '=') &&
++		quoteflag=0;
++		while ((!is_blank(cmd) || quoteflag) && (*cmd != '=') &&
+ 		       ((*cmd != '!') || (cmd[1]!= '=')) &&
+ 		       (*cmd != '<') && (*cmd != '>')) {
+-
++		    if (*cmd=='"') quoteflag=!quoteflag;
+ 		    cmd = skip_char(cmd);
+ 		}
+ 
+@@ -1603,7 +1640,11 @@
+ 
+ 		cmd = deblank(cmd);
+ 		str2 = cmd;
+-		while (!is_blank(cmd)) cmd = skip_char(cmd);
++		quoteflag=0;
++		while (!is_blank(cmd) || quoteflag) {
++		  if (*cmd=='"') quoteflag=!quoteflag;
++		  cmd = skip_char(cmd);
++		}
+ 		*cmd++ = 0;
+ 
+ 		if (*str1 == '#') {
+@@ -2243,7 +2284,8 @@
+ 
+ 	while(n_cmd_p->string) {
+ 
+-	    cpf = cgroupptr(n_cmd_p->string);
++/*	    cpf = cgroupptr(n_cmd_p->string);*/
++	    cpf = (BYTE FAR*)n_cmd_p->string;
+ 
+ 	    for(i=0; (cpf[i]==src[i]) && src[i]; i++);
+ 
+@@ -2489,6 +2531,16 @@
+ 	sprintf(dst,"%02d",time.hour);
+ }
+ 
++GLOBAL	VOID CDECL get_hour2(dst)
++BYTE	*dst;
++{
++	SYSTIME  time;
++		
++	ms_gettime(&time);
++
++	sprintf(dst,"%d",time.hour);
++}
++
+ GLOBAL	VOID CDECL get_minute(dst)
+ BYTE	*dst;
+ {
+@@ -2573,6 +2625,16 @@
+ 	sprintf(dst,"%d",date.month);
+ }
+ 
++GLOBAL	VOID CDECL get_moy(dst)
++BYTE	*dst;
++{
++	SYSDATE	date;
++	
++	ms_getdate(&date);
++	
++	sprintf(dst,"%02d",date.month);
++}
++
+ GLOBAL	VOID CDECL get_month_name(dst)
+ BYTE	*dst;
+ {
+@@ -2612,6 +2674,16 @@
+ 	sprintf(dst,"%d",date.day);
+ }
+ 
++GLOBAL	VOID CDECL get_dom(dst)
++BYTE	*dst;
++{
++	SYSDATE	date;
++	
++	ms_getdate(&date);
++	
++	sprintf(dst,"%02d",date.day);
++}
++
+ GLOBAL	VOID CDECL get_nday_of_week(dst)
+ BYTE	*dst;
+ {
+@@ -2651,3 +2723,53 @@
+ 	
+ 	sprintf(dst,"%d",i);
+ }
++
++GLOBAL	VOID CDECL get_errorlevel(dst)
++BYTE	*dst;
++{
++	sprintf(dst,"%d",err_ret & 255);
++}
++
++GLOBAL	VOID CDECL get_errorlvl(dst)
++BYTE	*dst;
++{
++	sprintf(dst,"%03d",err_ret & 255);
++}
++
++GLOBAL	VOID CDECL get_codepage(dst)
++BYTE	*dst;
++{
++	UWORD	currentcp,defaultcp;
++
++	ms_x_getcp(&currentcp,&defaultcp);
++
++	sprintf(dst,"%d",currentcp);
++}
++
++GLOBAL	VOID CDECL get_country(dst)
++BYTE	*dst;
++{
++	country.code=ms_s_country(&country);
++
++	sprintf(dst,"%d",country.code);
++}
++
++GLOBAL	VOID CDECL get_rows(dst)
++BYTE	*dst;
++{
++	UWORD	rows;
++
++	rows=get_lines_page();
++
++	sprintf(dst,"%d",rows);
++}
++
++GLOBAL	VOID CDECL get_columns(dst)
++BYTE	*dst;
++{
++	UWORD	columns;
++
++	columns=get_scr_width();
++
++	sprintf(dst,"%d",columns);
++}
+diff -u -P -r dr70106/command/cmdlist.c dr70107/command/cmdlist.c
+--- dr70106/command/cmdlist.c	1997-04-17 16:25:34.000000000 +0000
++++ dr70107/command/cmdlist.c	2005-01-24 16:49:08.000000000 +0000
+@@ -175,6 +175,7 @@
+ EXTERN	VOID	CDECL	get_full_name(BYTE *);
+ EXTERN	VOID	CDECL	get_hour(BYTE *);
+ EXTERN	VOID	CDECL	get_hour24(BYTE *);
++EXTERN	VOID	CDECL	get_hour2(BYTE *);
+ EXTERN	VOID	CDECL	get_minute(BYTE *);
+ EXTERN	VOID	CDECL	get_second(BYTE *);
+ EXTERN	VOID	CDECL	get_am_pm(BYTE *);
+@@ -182,31 +183,55 @@
+ EXTERN	VOID	CDECL	get_year(BYTE *);
+ EXTERN	VOID	CDECL	get_short_year(BYTE *);
+ EXTERN	VOID	CDECL	get_month(BYTE *);
++EXTERN	VOID	CDECL	get_moy(BYTE *);
+ EXTERN	VOID	CDECL	get_month_name(BYTE *);
+ EXTERN	VOID	CDECL	get_day(BYTE *);
++EXTERN	VOID	CDECL	get_dom(BYTE *);
+ EXTERN	VOID	CDECL	get_day_of_week(BYTE *);
+ EXTERN	VOID	CDECL	get_nday_of_week(BYTE *);
+ EXTERN	VOID	CDECL	get_os_version(BYTE *);
+ EXTERN	VOID	CDECL	get_connection(BYTE *);
++EXTERN	VOID	CDECL	get_errorlevel(BYTE *);
++EXTERN	VOID	CDECL	get_errorlvl(BYTE *);
++EXTERN	VOID	CDECL	get_codepage(BYTE *);
++EXTERN	VOID	CDECL	get_country(BYTE *);
++EXTERN	VOID	CDECL	get_rows(BYTE *);
++EXTERN	VOID	CDECL	get_columns(BYTE *);
+ 
+ GLOBAL	N_CMD	novell_ext_list[] = {
+ 	{ "LOGIN_NAME", get_login_name	},
+ 	{ "P_STATION",  get_pstation    },
+ 	{ "FULL_NAME",  get_full_name   },
+ 	{ "HOUR",	get_hour	},
++	{ "_HOUR",	get_hour2	},
+ 	{ "HOUR24",	get_hour24	},
+ 	{ "MINUTE",	get_minute	},
++	{ "_MINUTE",	get_minute	},
+ 	{ "SECOND",	get_second	},
++	{ "_SECOND",	get_second	},
+ 	{ "AM_PM",	get_am_pm	},
+ 	{ "GREETING_TIME", get_greeting },
+ 	{ "YEAR",	get_year	},
++	{ "_YEAR",	get_year	},
+ 	{ "SHORT_YEAR", get_short_year  },
+ 	{ "MONTH",	get_month	},
++	{ "_MONTH",	get_month	},
++	{ "MOY",	get_moy		},
+ 	{ "MONTH_NAME", get_month_name  },
+ 	{ "DAY",	get_day		},
++	{ "_DAY",	get_day		},
++	{ "DOM",	get_dom		},
+ 	{ "DAY_OF_WEEK",get_day_of_week },
++	{ "_DOW",	get_day_of_week },
+ 	{ "NDAY_OF_WEEK",get_nday_of_week},
++	{ "_DOWI",	get_nday_of_week},
+ 	{ "OS_VERSION", get_os_version  },
+ 	{ "STATION",    get_connection  },
++	{ "ERRORLEVEL",	get_errorlevel	},
++	{ "ERRORLVL",	get_errorlvl	},
++	{ "_CODEPAGE",	get_codepage	},
++	{ "_COUNTRY",	get_country	},
++	{ "_ROWS",	get_rows	},
++	{ "_COLUMNS",	get_columns	},
+ 	{ NULL,		NULL		}
+ };
+diff -u -P -r dr70106/command/com.c dr70107/command/com.c
+--- dr70106/command/com.c	2003-09-14 18:07:50.000000000 +0000
++++ dr70107/command/com.c	2005-01-10 23:12:02.000000000 +0000
+@@ -438,6 +438,7 @@
+ #else
+ 	BYTE	buf[MAX_ENVLEN], c;
+ 	UWORD	envsize = 256;
++	UWORD	oldenvsize = 0;
+ #endif
+ #if defined(DOSPLUS)
+ 	BOOLEAN	no_timedate = FALSE;
+@@ -469,8 +470,9 @@
+ 	batchflg_off = (VOID *) &batchflg;
+ 	echoflg_off  = (VOID *) &echoflg;
+ 
+-	envsize = get_original_envsize();	/* BAP - sets envsize to */
++	oldenvsize = get_original_envsize();	/* BAP - sets envsize to */
+ 						/* same as original COMMAND */
++	envsize=oldenvsize;
+ 	if ((envsize < 128) || (envsize > 32752)) envsize = 256; /* shouldn't really need this */
+ 
+ 	parent_psp = MK_FP(_psp2, 0x16);	/* our parental PSP is here  */
+@@ -523,6 +525,7 @@
+ 
+ 	initflg = YES;				/* there's only one 1st time */
+ 	cflag = 0;				/* Clear the switch variable */
++	if (oldenvsize==0) cflag|=1;		/* Assume primary shell if no previous env */
+ 
+ #if !defined(CDOSTMP)
+ 	/*
+@@ -1209,10 +1212,10 @@
+ 	REG S_CMD FAR *s_cmd_p;
+ 	WORD	  i;
+ 	BYTE FAR  *cpf;
+-	BYTE 	  loadfile[MAX_FILELEN];
++EXTERN	BYTE	  loadfile[MAX_FILELEN];
+ 	BYTE	  *cp1, *lcp;
+ 	UWORD	  loadtype;
+-	BYTE	  argv0[MAX_FILELEN];
++EXTERN	BYTE	  argv0[MAX_FILELEN];
+ 
+ 	heap_get(0);				/* check for stack overflow */
+ 	lcp = cp;				/* in case 1st parse fails.. */
+@@ -1247,7 +1250,8 @@
+ 
+ 	s_cmd_p = (S_CMD FAR *)farptr((BYTE *)&cmd_list[0]);
+ 	while(internal && s_cmd_p->cmnd) {	/* while more builtins	*/
+-	    cpf = cgroupptr(s_cmd_p->cmnd);
++/*	    cpf = cgroupptr(s_cmd_p->cmnd);*/
++	    cpf = (BYTE FAR*)s_cmd_p->cmnd;
+ 	    for(i=0;cpf[i];i++)			/* make upper case copy */
+ 	    	argv0[i]=toupper(cpf[i]);
+ 	    for(;i<8;argv0[i++]=' ');		/* space fill it to 8 */
+@@ -1300,7 +1304,8 @@
+             show_help(0);
+ 	    s_cmd_p = (S_CMD FAR *)farptr((BYTE *)&cmd_list[0]);
+ 	    while(s_cmd_p->cmnd) {
+-	        cpf = cgroupptr(s_cmd_p->cmnd);
++/*	        cpf = cgroupptr(s_cmd_p->cmnd);*/
++	        cpf = (BYTE FAR*)s_cmd_p->cmnd;
+                 printf("%s\t",cpf);
+ 	        s_cmd_p++;
+ 	    }
+@@ -1452,6 +1457,8 @@
+ 	    envpath = stack(strlen(heap()) + 1);
+ #else
+ 	    envpath = &pathbuf[0];
++	    if (strlen(heap())>=MAX_ENVLEN)
++	      heap()[MAX_ENVLEN]=0;
+ #endif
+ 	    strcpy(envpath, heap());
+ 	}
+@@ -1509,7 +1516,7 @@
+ 	    if((strlen(sppath) == 2) && (sppath[1] == ':'))
+ 		sppath[0] = '\0';
+ 
+-	} while(!*sppath && *path);
++	} while(!*sppath && (*path || *envpath));
+ 
+ 	return i;
+ }
+diff -u -P -r dr70106/command/comint.c dr70107/command/comint.c
+--- dr70106/command/comint.c	2003-09-25 01:51:06.000000000 +0000
++++ dr70107/command/comint.c	2004-11-24 17:31:18.000000000 +0000
+@@ -58,6 +58,8 @@
+ #include	"toupper.h"
+ #include	"support.h"		/* Support routines		 */
+ #include	"global.h"
++#include	"dos7.h"
++#include	<limits.h>
+ 
+ /*RG-00-*/
+ #if !defined(NOXBATCH)
+@@ -811,13 +813,16 @@
+ REG BYTE *cmd;
+ {
+ 	WORD	 nfiles, system, others, i;
+-	LONG	 nfree = 0L;
++	ULONG	 nfree = 0UL;
+ 	DTA	 search;
+ 	BYTE	 path[MAX_FILELEN];
+ 	BYTE	 s[MAX_PATHLEN], temp[3];
+ 	BYTE	 *ext, *memory;
+ 	UWORD	 free, secsiz, nclust;
+ 	UWORD	 flags;
++	FREED	freespace;
++	BYTE	FAR *dpath="A:\\";
++	BYTE	sbase=0;
+ 
+ 	if(f_check (cmd, "dsawlprcn2", &flags, NO))	/* if any bad flags */
+ 	    return;					/*    don't do it   */
+@@ -1029,20 +1034,40 @@
+ 	    e_check(ED_FILE);		/* after displaying File Not Found */
+ 	}
+ 
+-	if(ddrive != -1 && (ret = ms_drv_space(ddrive+1, &free, &secsiz, &nclust)) < 0) {
++	dpath[0]=ddrive+'A';
++	freespace.size=sizeof(freespace);
++	freespace.ver=0;
++	ret=ms_edrv_space(&dpath,(BYTE *)&freespace,sizeof(freespace));
++	if (ret==0) {
++	  nfree=freespace.freecl*freespace.secpclus;
++	  if (ULONG_MAX/freespace.bytepsec>=nfree)
++	    nfree*=freespace.bytepsec;
++	  else {
++	    sbase=1;
++	    if (freespace.bytepsec<1024)
++	      nfree/=(1024UL/freespace.bytepsec);
++	    else
++	      nfree*=(freespace.bytepsec/1024UL);
++	  }
++	}
++	else {
++	  if(ddrive != -1 && (ret = ms_drv_space(ddrive+1, &free, &secsiz, &nclust)) < 0) {
+ 	    /*e_check(ED_PATH);*/
+ 	    /*return;*/
+ 	    ret = 0; /* This prevents 'Invalid directory...' when looking */
+ 		     /* at a PNW login drive. */
++	  }
++	nfree = (ULONG)ret * (ULONG)free * (ULONG)secsiz;
+ 	}
+ 
+ 	show_crlf(OPT(DIR_PAGE));
+-	nfree = (LONG)ret * (LONG)free * (LONG)secsiz;
+ 	if (ddrive != -1) {
+ /*	    printf ("%9d %s%10ld %s", nfiles, MSG_FILES, nfree, MSG_FREE);*/
+ /*	    printf ("%9s %s%15ls %s", thousands(nfiles), MSG_FILES, thousands(nfree), MSG_FREE);*/
+ 	    printf ("%9s %s", thousands(nfiles), MSG_FILES);
+-	    printf ("%15ls %s", thousands(nfree), MSG_FREE);
++	    printf ("%15ls ", thousands(nfree));
++	    if (sbase==1) printf("K");
++	    printf("%s",MSG_FREE);
+ 	}
+ 	else
+ /*	    printf ("%9d %s", nfiles, MSG_FILES);*/
+@@ -1347,7 +1372,8 @@
+ REG BYTE *s;
+ {
+ 	BYTE	 srcfile[MAX_FILELEN], dstfile[MAX_FILELEN];
+-	BYTE	 pattern[MAX_FILELEN-MAX_PATHLEN];  
++/*	BYTE	 pattern[MAX_FILELEN-MAX_PATHLEN];  */
++	BYTE	 pattern[12];
+ 	BYTE	 *enddir;
+ #if defined(PASSWORD)
+ 	BYTE	*password;
+diff -u -P -r dr70106/command/cstart.asm dr70107/command/cstart.asm
+--- dr70106/command/cstart.asm	2003-11-30 18:49:56.000000000 +0000
++++ dr70107/command/cstart.asm	2004-09-23 17:26:56.000000000 +0000
+@@ -223,6 +223,7 @@
+ include char.def
+ .list
+ 
++MAX_FILELEN	equ	140
+ 
+ ; This is the offset in segment FFFF to which we will relocate.
+ ; It is set to E0 to allow for a PCNFS bug
+@@ -249,8 +250,7 @@
+ else					;  extra to save ENV in
+ ;C_HEAP_SIZE	equ	0800h		; C routine Heap Size
+ ;endif					; (observed sizes 500h-600h - IJ)
+-;C_HEAP_SIZE	equ	0860h		; C routine Heap Size
+-C_HEAP_SIZE	equ	08A0h		; C routine Heap Size
++C_HEAP_SIZE	equ	0860h		; C routine Heap Size
+ ; For safety increased that value as UNC filenames require 128 byte buffers
+ ; allocated dynamically on tha stack. With respect to the observed sizes
+ ; above it might be dangerous to leave that value at 0800h. I would have
+@@ -402,6 +402,10 @@
+ ED_TEXT		SEGMENT para public 'CDATA'
+ 	Public	ed_text_start
+ ed_text_start	label byte
++	Public	_loadfile
++_loadfile	db	MAX_FILELEN dup(?)
++	Public	_argv0
++_argv0		db	MAX_FILELEN dup(?)
+ ED_TEXT		ENDS
+ DYNAMIC		SEGMENT para public 'DDATA'
+ DYNAMIC		ENDS
+diff -u -P -r dr70106/command/csup.asm dr70107/command/csup.asm
+--- dr70106/command/csup.asm	2002-07-06 15:43:02.000000000 +0000
++++ dr70107/command/csup.asm	2004-08-17 12:02:10.000000000 +0000
+@@ -420,9 +420,10 @@
+         jnc     noprobs
+         xor     bp,bp
+ noprobs:
+-	mov	ax,sp		
+-	pop	bp		
+-	ret			
++;	mov	ax,sp
++	mov	ax,bp
++	pop	bp
++	ret
+ 
+ ;
+ ;	HEAP() can only return a pointer to the top of the C Heap
+diff -u -P -r dr70106/command/dos7.h dr70107/command/dos7.h
+--- dr70106/command/dos7.h	1970-01-01 00:00:00.000000000 +0000
++++ dr70107/command/dos7.h	2004-01-31 00:38:56.000000000 +0000
+@@ -0,0 +1,21 @@
++/*
++; DOS7.h - Definitions for DOS 7 data structures
++;
++; This file is part of
++; The DR-DOS/OpenDOS Enhancement Project - http://www.drdosprojects.de
++; Copyright (c) 2002-2004 Udo Kuhnt
++*/
++
++typedef struct {
++	UWORD	size;		// size of structure
++	UWORD	ver;		// version of structure
++	ULONG	secpclus;	// sectors per cluster
++	ULONG	bytepsec;	// bytes per sector
++	ULONG	freecl;		// available clusters
++	ULONG	ncluster;	// number of clusters on drive
++	ULONG	freesec;	// number of physical sectors available on drive
++	ULONG	nsecs;		// number of physical sectors on drive
++	ULONG	freepcl;	// available physical allocation units
++	ULONG	npclus;		// number of physical allocation units
++/*reserved	equ	24h	; reserved bytes*/
++} FREED;
+diff -u -P -r dr70106/command/dosif.asm dr70107/command/dosif.asm
+--- dr70106/command/dosif.asm	2003-09-25 00:47:52.000000000 +0000
++++ dr70107/command/dosif.asm	2004-02-01 19:47:06.000000000 +0000
+@@ -351,6 +351,51 @@
+ 	pop	bp
+ 	ret
+ 
++	Public	_ms_edrv_space
++;------------
++_ms_edrv_space:
++;------------
++;
++;	ret = _ms_edrv_space (&drive,&buffer,buflen);
++;	where:	drive	= drive path
++;		buffer  = buffer for free space structure
++;		ret	= error code
++
++	push	bp
++	mov	bp,sp
++	push	ds
++	push	es
++	push	dx
++	push	di
++	push	bx
++	mov	di,6[bp]		; ES:DI pointer to buffer
++	push	ds
++	pop	es
++	mov	bx,8[bp]		; CX length of buffer
++	mov	cx,[bx]
++	mov	bx,4[bp]		; DS:DX pointer to drive path
++	mov	dx,[bx]
++	mov	ax,2[bx]
++	mov	ds,ax
++	mov	ax,MS_EDRV_SPACE
++	int	DOS_INT
++	 jc	_ms_edrv_space20	; error?
++	cmp	ax,7300h		; function not implemented?
++	 jne	_ms_edrv_space10
++	mov	al,0ffh			; generic error code
++	stc
++	jmp	_ms_edrv_space20
++_ms_edrv_space10:
++	xor	ax,ax
++_ms_edrv_space20:
++	pop	bx
++	pop	di
++	pop	dx
++	pop	es
++	pop	ds
++	pop	bp
++	ret
++
+ 	Public	_ms_s_country
+ ;------------
+ _ms_s_country:
+diff -u -P -r dr70106/command/dosif.h dr70107/command/dosif.h
+--- dr70106/command/dosif.h	1997-04-16 21:10:16.000000000 +0000
++++ dr70107/command/dosif.h	2004-01-31 15:44:10.000000000 +0000
+@@ -179,3 +179,5 @@
+ EXTERN	WORD	CDECL	get_lines_page(VOID);
+ EXTERN	WORD	CDECL	get_scr_width(VOID);
+ EXTERN	WORD	CDECL	novell_copy(WORD,WORD,ULONG);
++
++EXTERN WORD CDECL     ms_edrv_space(BYTE FAR * NEAR *,BYTE *,UWORD);
+diff -u -P -r dr70106/command/make.bat dr70107/command/make.bat
+--- dr70106/command/make.bat	2003-09-12 13:48:14.000000000 +0000
++++ dr70107/command/make.bat	2005-01-10 23:07:20.000000000 +0000
+@@ -4,8 +4,10 @@
+ SET MASM=C:\MASM\BIN\ML.EXE /c /Zm
+ SET WATCOM=C:\WATCOM
+ SET WATCOMH=%WATCOM%\H
+-SET WCG=%WATCOM%\BIN\WCGL.EXE
+-SET WC=%WATCOM%\BINB\WCC.EXE
++IF EXIST %WATCOM%\BIN\WCGL.EXE SET WCG=%WATCOM%\BIN\WCGL.EXE
++IF EXIST %WATCOM%\BINB\WCC.EXE SET WC=%WATCOM%\BINB\WCC.EXE
++IF EXIST %WATCOM%\BINW\WCGL.EXE SET WCG=%WATCOM%\BINW\WCGL.EXE
++IF EXIST %WATCOM%\BINW\WCC.EXE SET WC=%WATCOM%\BINW\WCC.EXE
+ SET LINK510=%TOOLS%\LINK.EXE
+ SET BCC20=%TOOLS%\BCC.EXE
+ SET BCC20H=%TOOLS%\BCC20\H
+@@ -63,6 +65,8 @@
+ IF ERRORLEVEL 1 GOTO FAILED
+ %WC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\comcpy.obj .\comcpy.c
+ IF ERRORLEVEL 1 GOTO FAILED
++%WC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\cmdlist.obj .\cmdlist.c
++IF ERRORLEVEL 1 GOTO FAILED
+ 
+ ECHO -w -d -f- -K -O -X -Z -c -ms -I%BCC20H% -DMESSAGE -DDOSPLUS -zSCGROUP -zTCODE -zR_MSG > RESP1
+ ECHO -I.\ >> RESP1
+@@ -109,12 +113,12 @@
+ REM **********************
+ REM CLEAN UP THE AREA
+ REM **********************
+-SET TOOLS=
+-SET MASM=
+-SET WC=
+-SET LINK510=
+-SET BCC20=
+-SET WATCOMH=
+-SET BCC20H=
+-SET LOCTOOLS=
++rem SET TOOLS=
++rem SET MASM=
++rem SET WC=
++rem SET LINK510=
++rem SET BCC20=
++rem SET WATCOMH=
++rem SET BCC20H=
++rem SET LOCTOOLS=
+ 
+diff -u -P -r dr70106/command/message.asm dr70107/command/message.asm
+--- dr70106/command/message.asm	2003-12-29 20:46:50.000000000 +0000
++++ dr70107/command/message.asm	2005-03-06 19:25:18.000000000 +0000
+@@ -17,7 +17,7 @@
+ 	public	_msg_version
+ 	public	msg_version
+ msg_version	label	byte
+-_msg_version	db	LF, "DR-DOS 7.01.06 ", "based on Caldera OpenDOS 7.01", LF, NUL
++_msg_version	db	LF, "Enhanced DR-DOS 7.01.07 (6.3.2005) ", "based on Caldera OpenDOS 7.01", LF, NUL
+ 	public	_msg_lbl
+ 	public	msg_lbl
+ msg_lbl	label	byte
+@@ -206,7 +206,7 @@
+ 	public	msg_cpyright
+ msg_cpyright	label	byte
+ _msg_cpyright	db	"Copyright (c) 1976, 1997 Caldera, Inc. ", "All rights reserved.", LF
+-		db	"Patches to original OpenDOS source code ", "Copyright (c) 2002-2003 Udo Kuhnt", LF, NUL
++		db	"Patches to original OpenDOS source code ", "Copyright (c) 2002-2005 Udo Kuhnt", LF, NUL
+ 	public	_msg_serialno
+ 	public	msg_serialno
+ msg_serialno	label	byte
+diff -u -P -r dr70106/command/msdos.equ dr70107/command/msdos.equ
+--- dr70106/command/msdos.equ	1997-04-16 10:25:08.000000000 +0000
++++ dr70107/command/msdos.equ	2004-01-31 00:27:16.000000000 +0000
+@@ -122,6 +122,8 @@
+ MS_X_SETHC	equ	67h
+ MS_X_COMMIT	equ	68h
+ 
++MS_EDRV_SPACE	equ	7303h
++
+ DOS_INT     equ 21h ; DOS Entry Point
+ ;
+ STDIN		equ	0	; Standard Console Input Handle
+diff -u -P -r dr70106/command/support.c dr70107/command/support.c
+--- dr70106/command/support.c	1997-04-16 22:03:04.000000000 +0000
++++ dr70107/command/support.c	2005-02-18 02:17:12.000000000 +0000
+@@ -426,6 +426,12 @@
+ 	return (b >= '0' && b <= '9');
+ }
+ 
++GLOBAL BOOLEAN isletter(b)
++BYTE b;
++{
++	return ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z'));
++}
++
+ GLOBAL BYTE * skip_char(s)
+ REG BYTE *s;
+ {
+diff -u -P -r dr70106/command/support.h dr70107/command/support.h
+--- dr70106/command/support.h	1997-04-16 21:14:30.000000000 +0000
++++ dr70107/command/support.h	2005-02-18 02:15:52.000000000 +0000
+@@ -64,6 +64,7 @@
+ EXTERN VOID      putc (BYTE);
+ EXTERN VOID      puts(BYTE *);
+ EXTERN BOOLEAN   isdigit(BYTE);
++EXTERN BOOLEAN   isletter(BYTE);
+ 	
+ EXTERN BYTE *	strlwr(BYTE *);
+ EXTERN BYTE *	strupr(BYTE *);
+diff -u -P -r dr70106/drbio/bdosldr.a86 dr70107/drbio/bdosldr.a86
+--- dr70106/drbio/bdosldr.a86	2003-09-11 19:45:58.000000000 +0000
++++ dr70107/drbio/bdosldr.a86	2005-01-24 19:46:52.000000000 +0000
+@@ -44,6 +44,7 @@
+ DATTS		equ	byte ptr 11
+  DA_VOLUME	equ	08h
+  DA_DIR		equ	10h
++DBLOCK1H	equ	word ptr 20
+ DBLOCK1		equ	word ptr 26
+ DSIZE		equ	word ptr 28
+ 
+@@ -89,11 +90,29 @@
+ 	mov	intrpt_off,ax
+ 	mov	intrpt_seg,es		; get interrupt segment
+ 
++login_drive12:
+ 	mov	bx,offset req_hdr
+ 	mov	ds:RH_UNIT,dl		; save logical unit to use
+ 	mov	ds:RH_CMD,CMD_BUILD_BPB
+ 	call	device_request		; tell it to build a BPB
+-	 jc	dev_fail		; return if can't determine BPB
++;	 jc	dev_fail		; return if can't determine BPB
++	 jnc	login_drive15
++	jmp	dev_fail		; return if can't determine BPB
++login_drive15:
++	les	di,ds:RH2_BPB
++	mov	ax,part_off
++	cmp	es:word ptr BPB_HIDDEN[di],ax
++	 jne	login_drive17
++	mov	ax,part_off+2
++	cmp	es:word ptr BPB_HIDDEN+2[di],ax
++	 je	login_drive18
++login_drive17:
++	inc	boot_drv
++	mov	dl,boot_drv
++	jmps	login_drive12
++login_drive18:
++	mov	dl,boot_drv
++	mov	init_drv,dl
+ 	push	ds ! push si
+ 	push	ds ! pop es
+ 	mov	di,offset local_bpb	; ES:DI -> local BPB copy
+@@ -105,7 +124,16 @@
+ ;	Now we have to figure out whether the media uses 12 or 16 bit FATs.
+ ;	To that end, we need to compute the # of clusters on the drive:
+ 
+-	mov	fat16,0			; assume 12 bit FAT
++	cmp	BT_dirsize,0		; check for FAT32 file system
++	 jnz	login_drive20		; fixed root dir, FAT12/16
++	mov	fattype,2		; this is probably a FAT32 drive
++	mov	ax,BT_big_fat_size
++	mov	nfatsecs,ax
++	mov	ax,BT_big_fat_size+2
++	mov	nfatsecs+2,ax
++	ret
++login_drive20:
++	mov	fattype,0			; assume 12 bit FAT
+ 
+ 	mov	al,BT_nfats		; compute FAT size
+ 	mov	ah,0			; AX = # of FAT copies (usually 2)
+@@ -144,8 +172,12 @@
+ 	inc	ax			; cluster 0,1 are reserved
+ 	cmp	ax,0FF6h		; is this too large for 12 bits?
+ 	 jbe	dev_12bit		; skip if 12 bits will do
+-	mov	fat16,-1		; else we use 16 bits
++	mov	fattype,1		; else we use 16 bits
+ dev_12bit:
++	mov	ax,BT_fat_size
++	mov	nfatsecs,ax
++	xor	ax,ax
++	mov	nfatsecs+2,ax
+ 	ret
+ 
+ 
+@@ -223,23 +255,53 @@
+ ;---------
+ ;	entry:	SI -> 11 byte file name
+ 
++	cmp	fattype,2		; booting from a FAT32 drive?
++	 je	open_file10		; yes
++	xor	ax,ax
++	push	ax
+ 	mov	al,BT_nfats
+ 	cbw
+-	mul	BT_fat_size		; DX:AX = # FAT sectors
+-
+-	mov	cx,ax			; CX = rel_sctr dir start
++	push	ax
++	push	nfatsecs+2
++	push	nfatsecs
++	sub	sp,8			; reserve space on stack
++;	mul	BT_fat_size		; DX:AX = # FAT sectors
++	call	mul32
++	pop	ax
++	pop	dx			; DX:AX = # FAT sectors
++	add	sp,12			; clean up the stack
++	mov	cx,ax			; BP:CX = rel_sctr dir start
++	mov	bp,dx
+ 	mov	dx,BT_dirsize		; dx = # entries to scan
+-
++	jmps	open_f1
++open_file10:
++	mov	bp,BT_fs_root+2		; FAT32 root dir cluster
++	mov	cx,BT_fs_root
++open_file15:
++	mov	start_cluster+2,bp
++	mov	start_cluster,cx
++	call	clus2sec
++	mov	al,BT_sctr_per_cluster
++	cbw
++	mul	BT_bytes_per_sector
++	mov	bx,32
++	div	bx
+ open_f1: 				; CX = current dir sector
+ 					; DX = current dir count
+ 					; SI -> file name
+-	push	cx ! push dx ! push si
++	push	bp
++	push	cx
++	push dx ! push si
+ 	push	ds ! pop es		; ES:BX -> sector buffer
+ 	mov	bx,offset sector_buffer
+ 	mov	dx,1			; read one directory sector
+ 	call	rd_sector_rel		;     via disk driver
+-	pop	si ! pop dx ! pop cx
+-	inc	cx			; increment sector for next time
++	pop	si ! pop dx
++	pop	cx
++	pop	bp
++;	inc	cx			; increment sector for next time
++	add	cx,1			; increment sector for next time
++	adc	bp,0
+ 
+ 	sub	bx,bx			; start at beginning of sector
+ open_f2:
+@@ -254,11 +316,20 @@
+ 	 jz	open_foundit		; skip if matches
+ open_f3:
+ 	dec	dx			; count down root directory entries
+-	 jz	open_fail		; skip if root directory done
++;	 jz	open_fail		; skip if root directory done
++	 jz	open_f4			; skip if end of root dir or cluster reached
+ 	add	bx,32			; next entry in directory sector
+ 	cmp	bx,BT_bytes_per_sector	; sector complete?
+ 	 jb	open_f2			; loop back while more
+ 	jmps	open_f1			; read next directory sector
++open_f4:
++	cmp	fattype,2		; FAT32 root dir?
++	 jne	open_fail		; no, reached end of root dir
++	mov	bp,start_cluster+2	; else look for next dir cluster
++	mov	cx,start_cluster
++	call	next_cluster		; find next cluster in chain
++	 jc	open_fail		; already at last root dir cluster
++	jmps	open_file15
+ 
+ open_fail:				; file not found
+ 	jmp	dev_fail
+@@ -276,6 +347,12 @@
+ 	mov	ax,DBLOCK1[di]		; get first disk block
+ 	mov	start_cluster,ax	; save starting cluster
+ 	xor	ax,ax
++	cmp	fattype,2		; FAT32 drive?
++	 jne	open_found15		; no, then skip high word of cluster
++	mov	ax,DBLOCK1H[di]
++open_found15:
++	mov	start_cluster+2,ax
++	xor	ax,ax
+ 	ret				; return success
+ 
+ 
+@@ -288,19 +365,28 @@
+ rd_file1:
+ 	mov	cluster_count,1		; we can read at least one cluster
+ 	mov	cx,start_cluster
++	mov	bp,start_cluster+2
+ rd_file2:				; check if next cluster contiguous
++	push	bp
+ 	push	cx			; save current cluster number
+ 	call	next_cluster		; get link to next cluster
+ 	pop	dx			; get previous cluster #
+-	inc	dx			; is current cluster contiguous?
+-	cmp	cx,dx			; contiguos if CX == DX
++	pop	ax
++;	inc	dx			; is current cluster contiguous?
++	add	dx,1			; is current cluster contiguous?
++	adc	ax,0
++	cmp	cx,dx			; contiguos if BP:CX == AX:DX
+ 	 jne	rd_file3		; no, need a separate read
++	cmp	bp,ax
++	 jne	rd_file3
+ 	inc	cluster_count		; else read one more cluster
+ 	jmps	rd_file2		; try again with next cluster
+-rd_file3:				; CX = next chain, multi cluster read
++rd_file3:				; BP:CX = next chain, multi cluster read
++	push	bp
+ 	push	cx			; save start of next chain
+ 	les	bx,dta_ptr		; ES:BX -> transfer address
+ 	mov	cx,start_cluster	; previous contiguous chain starts here
++	mov	bp,start_cluster+2
+ 	mov	dx,cluster_count	; length of chain in clusters
+ 	call	rd_cluster		; read DX clusters
+ 	mov	al,BT_sctr_per_cluster
+@@ -308,10 +394,14 @@
+ 	mul	cluster_count		; AX = sectors in chain to read
+ 	mul	BT_bytes_per_sector	; AX = bytes in chain to read
+ 	add	dta_off,ax
+-	pop	cx			; CX = next (noncontiguous) cluster
++	pop	cx			; BP:CX = next (noncontiguous) cluster
++	pop	bp
+ 	mov	start_cluster,cx	; start of new chain
++	mov	start_cluster+2,bp
+ 	inc	cx			; was it end of file cluster number?
+ 	 jnz	rd_file1		; go back for more if not
++	inc	bp
++	 jnz	rd_file1
+ 					; else all clusters done
+ 	ret
+ 
+@@ -324,6 +414,7 @@
+ 	sub	dx,dx			; AX/DX = 32 bit offset
+ 	div	BT_bytes_per_sector	; AX = sector, DX = offset in sector
+ 	push	dx			; save offset in sector
++	xor	dx,dx
+ 	call	locate_FAT		; read FAT sector AX
+ 	pop	bx			; BX = offset in FAT sector
+ 	mov	al,sector_buffer[bx]	; get byte from FAT buffer
+@@ -332,14 +423,18 @@
+ 
+ locate_FAT:
+ ;----------
+-;	entry:	AX = FAT sector to locate
++;	entry:	DX:AX = FAT sector to locate
+ 
+ 	cmp	ax,current_fatsec	; AX = sector offset into FAT
++	 jne	locate_fat10
++	cmp	dx,current_fatsec+2
+ 	 je	locate_FAT_match	; O.K. if same as last time
+-
++locate_fat10:
+ 	mov	current_fatsec,ax	; set new sector for next time
++	mov	current_fatsec+2,dx
+ 	push	cx ! push si		; preserve FAT index
+-	mov	cx,ax			; CX = sector number
++	mov	bp,dx
++	mov	cx,ax			; BP:CX = sector number
+ 	mov	bx,offset sector_buffer
+ 	push	ds ! pop es		; ES:BX -> sector buffer
+ 	mov	dx,1			; DX = single sector
+@@ -355,10 +450,10 @@
+ ;	same parameters as rd_sector
+ rd_sector_rel:
+ ;-------------
+-;	entry:	CX = sector address relative to first FAT sector
++;	entry:	BP:CX = sector address relative to first FAT sector (32-bit)
+ ;		DX = sector count
+ 
+-	sub	bp,bp				;overflow word = 0
++;	sub	bp,bp				;overflow word = 0
+ 	add	cx,BT_reserved_sectors
+ 	adc	bp,0
+ ;	jmps	rd_sector
+@@ -398,7 +493,7 @@
+ 
+ rd_cluster:
+ ;----------
+-;	entry:	CX = DOS cluster number.
++;	entry:	BP:CX = DOS cluster number.
+ ;		DX = cluster count
+ ;		ES:BX -> transfer buffer
+ 
+@@ -415,16 +510,39 @@
+ 	push	ax			; save the sector count
+ 
+ 	sub	cx,2			; cluster 2 is data area start
++	sbb	bp,0
++	xor	ax,ax
++	push	ax
+ 	mov	al,BT_sctr_per_cluster
+ ;	cbw
+ 	xor	ah,ah
+-	mul	cx			; AX,DX = relative sector #
++	push	ax
++	push	bp
++	push	cx
++	sub	sp,8			; reserve space on stack
++;	mul	cx			; AX,DX = relative sector #
++	call	mul32
++	pop	ax
++	pop	dx			; DX:AX = relative sector #
++	add	sp,12			; clean up the stack
+ 	mov	cx,ax
+ 	mov	bp,dx			; CX,BP = data area sector #
+ 
++	push	bp
++	xor	ax,ax
++	push	ax
+ 	mov	al,BT_nfats		; compute FAT size
+ 	mov	ah,0			; AX = # of FAT copies (usually 2)
+-	mul	BT_fat_size		; AX/DX = size of FAT in sectors
++	push	ax
++	push	nfatsecs+2
++	push	nfatsecs
++	sub	sp,8			; reserve space on stack
++;	mul	BT_fat_size		; AX/DX = size of FAT in sectors
++	call	mul32
++	pop	ax
++	pop	dx			; DX:AX = size of FAT in sectors
++	add	sp,12			; clean up the stack
++	pop	bp
+ 	add	cx,ax
+ 	adc	bp,dx			; CX,BP = end of FAT sectors
+ 
+@@ -453,19 +571,60 @@
+ next_cluster:
+ ;------------
+ 	push	dx ! push bx		; save some registers
+-	cmp	fat16,0			; check if this is 12 bit media
++	cmp	fattype,0		; check if this is 12 bit media
+ 	 je	next_cluster12		; skip if old fashioned 12 bit
++	xor	ax,ax
++	push	ax
++	cmp	fattype,1		; is this FAT16?
++	 jne	next_cluster5		; no, it must be FAT32
+ 	mov	ax,2
+-	mul	cx			; AX/DX = byte offset in FAT (max. 128K)
+-	div	BT_bytes_per_sector	; AX = FAT sector #, DX = byte offset
+-	push	dx			; save byte offset within sector
++	jmps	next_cluster6
++next_cluster5:
++	mov	ax,4
++next_cluster6:
++	push	ax
++	push	bp
++	push	cx
++	sub	sp,8			; reserve space on stack
++;	mul	cx			; AX/DX = byte offset in FAT (max. 128K)
++	call	mul32
++	pop	ax
++	pop	dx
++	add	sp,12			; clean up the stack again
++	push	dx
++	push	ax
++	xor	ax,ax
++	push	ax
++	push	BT_bytes_per_sector
++	sub	sp,8			; reserve space on stack
++;	div	BT_bytes_per_sector	; AX = FAT sector #, DX = byte offset
++	call	div32
++	pop	bx
++	add	sp,2
++	pop	ax
++	pop	dx
++	add	sp,8			; clean up the stack
++;	push	dx			; save byte offset within sector
++	push	bx			; save byte offset within sector
+ 	call	locate_FAT		; get FAT sector AX
+ 	pop	bx			; BX = offset within sector
+ 	mov	cx,word ptr sector_buffer[bx]
+ 					; get 16 bit from FAT
+-
++	xor	bp,bp
++	cmp	fattype,2		; is this FAT32?
++	 jne	next_cluster7		; no, skip high word
++	mov	bp,word ptr sector_buffer+2[bx]
++					; get high 16 bit from FAT
++	and	bp,0FFFh		; mask out reserved high nibble
++next_cluster7:
+ 	cmp	cx,0FFF7h		; check if too large for #
+-	 jae	next_cluster_eof	; set carry, EOF
++;	 jae	next_cluster_eof	; set carry, EOF
++	 jb	next_cluster9
++	cmp	fattype,2		; FAT32?
++	 jne	next_cluster_eof	; no, then it is already EOF
++	cmp	bp,0FFFh		; else also check high word
++	 je	next_cluster_eof	; set carry, EOF
++next_cluster9:
+ 	clc
+ 	jmps	next_cluster_ret	; good link
+ 
+@@ -491,17 +650,143 @@
+ even_fat:				; even entry, strip off top bits
+ 	and	ax,0fffh		; bx[0..11] are cluster
+ 	mov	cx,ax			; CX = cluster number
++	xor	bp,bp
+ 	cmp	cx,0ff7h		; compare with largest legal 12 bit #
+ 	 jae	next_cluster_eof	; check for end mark
+ 	clc
+ 	jmps	next_cluster_ret	; return value in CX, CY = 0
+ next_cluster_eof:
+ 	mov	cx,-1			; indicate end of chain
++	mov	bp,-1
+ 	stc				; end of chain
+ next_cluster_ret:
+ 	pop	bx ! pop dx
+ 	ret
+ 
++clus2sec:
++;----------
++;	entry:	BP:CX = DOS cluster number
++;	exit:	BP:CX = sector number
++
++	sub	cx,2			; cluster 2 is data area start
++	sbb	bp,0
++	xor	ax,ax
++	push	ax
++	mov	al,BT_sctr_per_cluster
++;	cbw
++	xor	ah,ah
++	push	ax
++	push	bp
++	push	cx
++	sub	sp,8			; reserve space on stack
++;	mul	cx			; AX,DX = relative sector #
++	call	mul32
++	pop	ax
++	pop	dx			; DX:AX = relative sector #
++	add	sp,12			; clean up the stack
++	mov	cx,ax
++	mov	bp,dx			; CX,BP = data area sector #
++
++	push	bp
++	xor	ax,ax
++	push	ax
++	mov	al,BT_nfats		; compute FAT size
++	mov	ah,0			; AX = # of FAT copies (usually 2)
++	push	ax
++	push	nfatsecs+2
++	push	nfatsecs
++	sub	sp,8			; reserve space on stack
++;	mul	BT_fat_size		; AX/DX = size of FAT in sectors
++	call	mul32
++	pop	ax
++	pop	dx			; DX:AX = size of FAT in sectors
++	add	sp,12			; clean up the stack
++	pop	bp
++	add	cx,ax
++	adc	bp,dx			; CX,BP = end of FAT sectors
++	ret
++
++mul32:					; 32-bit multiplication
++;--------
++; On Entry:
++;	32-bit factors on stack
++;	space for 64-bit product reserved on stack
++;	SP-16
++; On Exit:
++;	64-bit product on stack
++;	SP-16
++;	Carry flag set if result does not fit in double word
++; Modified registers:
++;	AX,DX,BP,SP
++	mov	bp,sp			; base address of temporary variables
++	add	bp,2
++	mov	ax,10[bp]		; multiply high word of factors
++	mul	word ptr 14[bp]
++	mov	4[bp],ax		; store result
++	mov	6[bp],dx
++	mov	ax,10[bp]		; multiply high word of first factor with low word of second
++	mul	word ptr 12[bp]
++	mov	2[bp],ax		; add result to previous
++	add	4[bp],dx
++	adc	word ptr 6[bp],0
++	mov	ax,8[bp]		; multiply low word of first factor with high word of second
++	mul	word ptr 14[bp]
++	add	2[bp],ax		; add result to previous
++	adc	4[bp],dx
++	adc	word ptr 6[bp],0
++	mov	ax,8[bp]		; multiply low word of first factor with low word of second
++	mul	word ptr 12[bp]
++	mov	[bp],ax			; add result
++	add	2[bp],dx
++	adc	word ptr 4[bp],0
++	adc	word ptr 6[bp],0
++	cmp	word ptr 4[bp],0	; 64-bit result?
++	 jnz	mul32_1			; yes
++	cmp	word ptr 6[bp],0
++	 jz	mul32_2			; no
++mul32_1:
++	stc				; yes, set carry flag to indicate this
++mul32_2:
++	ret
++
++div32:					; 32-bit division
++;--------
++; On Entry:
++;	32-bit dividend & divisor on stack
++;	space for 32-bit quotient & remainder reserved on stack
++;	SP-16
++; On Exit:
++;	32-bit quotient & remainder on stack
++;	SP-16
++; Modified registers:
++;	AX,CX,DX,BP
++	mov	bp,sp			; base address of temporary variables
++	add	bp,2
++	xor	ax,ax			; clear work registers
++	xor	dx,dx
++	mov	cx,32			; 32 bits
++div32_loop:
++	shl	word ptr 4[bp],1	; multiply quotient with two
++	rcl	word ptr 6[bp],1
++	shl	word ptr 12[bp],1	; shift one bit from dividend
++	rcl	word ptr 14[bp],1
++	rcl	ax,1			; to work registers
++	rcl	dx,1
++	cmp	dx,10[bp]		; compare high word with divisor
++	 jb	div32_2
++	 ja	div32_1
++	cmp	ax,8[bp]		; compare low word
++	 jb	div32_2
++div32_1:
++	or	word ptr 4[bp],1	; divisor fits one time
++	sub	ax,8[bp]		; subtract divisor
++	sbb	dx,10[bp]
++div32_2:
++	loop	div32_loop		; loop back if more bits to shift
++	mov	[bp],ax			; save remainder onto stack
++	mov	2[bp],dx
++	ret
++
+ 
+ eject
+ ;
+@@ -513,6 +798,7 @@
+ 		extrn	current_dos:word	; current BDOS segment
+ 		extrn	boot_device:dword	; device driver we boot from
+ 		extrn	boot_drv:byte		; boot drive
++		extrn	init_drv:byte		; init drive
+ 		extrn	dos_name:byte		; name of BDOS file
+ 
+ strat_ptr	rd	0
+@@ -527,12 +813,16 @@
+ dta_off		rw	1
+ dta_seg		rw	1
+ 
+-start_cluster	rw	1
++start_cluster	rw	2
+ cluster_count	rw	1
+ dosfile_size	rw	1
+ 
+-current_fatsec	dw	-1			; no FAT sector read yet
+-fat16		dw	0			; defaults to 12 bit FAT
++current_fatsec	dw	-1,-1			; no FAT sector read yet
++fattype		dw	0			; defaults to 12 bit FAT
++nfatsecs	dw	0,0			; number of FAT sectors (32-bit)
++
++	Public	part_off
++part_off	dw	0,0			; offset of boot partition
+ 
+ ;	single error message if BDOS can't be loaded:
+ 
+@@ -583,7 +873,14 @@
+ BT_nheads		rw	1
+ BT_hidden_sectors	rw	2
+ BT_total_long		rw	2
++BT_big_fat_size		rw	2
++BT_fat_flags		rw	1
++BT_fs_version		rw	1
++BT_fs_root		rw	2
++BT_fs_info		rw	1
++BT_boot_backup		rw	1
+ BPB_LENGTH		equ	(offset $-offset local_bpb)
++BPB_HIDDEN		equ	17
+ 
+ 	extrn	sector_buffer:byte
+ 
+diff -u -P -r dr70106/drbio/biosgrps.equ dr70107/drbio/biosgrps.equ
+--- dr70106/drbio/biosgrps.equ	2003-03-29 00:16:32.000000000 +0000
++++ dr70107/drbio/biosgrps.equ	1997-04-16 10:21:54.000000000 +0000
+@@ -46,6 +46,9 @@
+ RESUMECODE	segment public para 'RESUMECODE'
+ RESUMECODE	ends
+ 
++RESBIOS		segment public para 'RESBIOS'
++RESBIOS		ends
++
+ ICODE		segment public word 'ICODE'
+ ICODE		ends
+ 
+@@ -55,15 +58,12 @@
+ INITCODE	segment public para 'INITCODE'
+ INITCODE	ends
+ 
+-INITDATA	segment public para 'INITDATA'
+-INITDATA	ends
+-
+-RESBIOS		segment public para 'RESBIOS'
+-RESBIOS		ends
+-
+ STACKS		segment	public para 'STACKS'
+ STACKS		ends
+ 
++INITDATA	segment public para 'INITDATA'
++INITDATA	ends
++
+ INITPSP		segment public para 'INITDATA'
+ INITPSP		ends
+ 
+diff -u -P -r dr70106/drbio/biosinit.a86 dr70107/drbio/biosinit.a86
+--- dr70106/drbio/biosinit.a86	2003-02-21 15:10:32.000000000 +0000
++++ dr70107/drbio/biosinit.a86	2005-01-24 17:29:08.000000000 +0000
+@@ -80,7 +80,7 @@
+ INIT_WINDOWS	equ	0004h		; Disable windows support
+ 
+ COMMAND_BASE	equ	000E0h		; must cover FFFF:D0 for CALL5 fixup
+-COMMAND_SIZE	equ	015C0h
++COMMAND_SIZE	equ	01680h
+ 
+ CGROUP	GROUP	CODE, INITCODE, INITDATA, INITPSP, INITENV, DATAEND
+ CODE	CSEG
+@@ -111,13 +111,14 @@
+ 	extrn	setup_ldt:near
+ 	extrn	setup_stacks:near
+ 	extrn	dos_version_check:near
++	extrn	preload_done:near
+ 
+ 		db	'Copyright (c) 1983,1996 '
+ 		db	'Caldera, Inc. All Rights Reserved '
+ 		db	'XXXX-0000-987654321X '
+ 
+ 		db	'Patches to original OpenDOS source code '
+-		db	'Copyright (c) 2002-2003 Udo Kuhnt'
++		db	'Copyright (c) 2002-2005 Udo Kuhnt'
+ 
+ 
+ 	Public	biosinit
+@@ -144,6 +145,8 @@
+ 	cli
+ 	mov	ax,cs			; Initialise our stack and Data Segment
+ 	mov	ds,ax
++	pop	ds:part_off
++	pop	ds:part_off+2
+ 	mov	ss,ax
+ 	mov	sp,offset stack
+ 	sti
+@@ -317,9 +320,13 @@
+ 	xor	ax,ax
+ 	mov	es,ax			; ES -> interrupt vectors
+ 	mov	ax,ds:DOS_DATA		; get # of bytes of DOS data
++	mov	cs:dosdata_len,ax
++	add	ax,15
+ 	shr	ax,cl			; get para size of DOS data
+-	xchg	ax,cs:free_seg		; get seg for DOS data
+-	add	cs:free_seg,ax		; remember how much we used
++	sub	cs:mem_max,ax
++	mov	ax,cs:mem_max
++;	xchg	ax,cs:free_seg		; get seg for DOS data
++;	add	cs:free_seg,ax		; remember how much we used
+ 	mov	es:INT31_SEGMENT,ax	; update the segment value of INT31
+ 	mov	es,ax			;  so ROMMED systems can find PCM_DSEG
+ 	mov	cs:dos_dseg,ax		; we need to remember where too...
+@@ -358,13 +365,17 @@
+ 	push cs ! pop ds
+ 	push cs ! pop es
+ 
++	mov	cl,dev_count
++	mov	res_dev_count,cl
+ 	mov	cl,4			; reserve space for resident DDSC's
+ 	mov	ax,DDSC_LEN
+ 	mul	dev_count		; AX byte are required
+ 	add	ax,15
+ 	shr	ax,cl			; AX para are required
+-	xchg	ax,free_seg
+-	add	free_seg,ax		; we have allocated the space
++	sub	mem_max,ax
++	mov	ax,mem_max
++;	xchg	ax,free_seg
++;	add	free_seg,ax		; we have allocated the space
+ 	mov	res_ddsc_seg,ax		; point res_ddsc_ptr at the space
+ 	mov	dx,dos_dseg
+ 	sub	ax,dx			; DOS resident DDSC_'s use DOS data seg
+@@ -375,6 +386,10 @@
+ 	mov	res_ddsc_seg,dx		; setup pointer to resident DDSC's
+ dos_r50:
+ 
++	mov	ax,free_seg		; reserve space for interrupt stubs
++	mov	int_stubs_seg,ax
++	add	free_seg,11
++
+ ;
+ ;	Call the DOS INIT Code passing all the information setup
+ ;	by the BIOS.
+@@ -382,17 +397,18 @@
+ 	mov	ax,mem_size		; pass the Memory Size, the first free
+ 	mov	bx,free_seg		;  segment and the initial 
+ 	mov	dl,init_drv		;  drive to the DOS init routine
++	mov	es,int_stubs_seg
+ 	cli
+ 	mov	ds,dos_dseg		; DS -> DOS data segment
+ 	callf	cs:dos_init
+ 
+-	mov	es,cs:dos_dseg
+-	mov	bx,26h			; ES:BX -> list of lists
+-	mov	ax,es:word ptr F52_FCBPTR[bx]
+-    shr ax,1 ! shr ax,1     
+-    shr ax,1 ! shr ax,1     
+-	and	es:word ptr F52_FCBPTR[bx],15
+-	add	es:word ptr F52_FCBPTR+2[bx],ax
++;	mov	es,cs:dos_dseg
++;	mov	bx,26h			; ES:BX -> list of lists
++;	mov	ax,es:word ptr F52_FCBPTR[bx]
++;    shr ax,1 ! shr ax,1     
++;    shr ax,1 ! shr ax,1     
++;	and	es:word ptr F52_FCBPTR[bx],15
++;	add	es:word ptr F52_FCBPTR+2[bx],ax
+ 	sti
+ 	push cs ! pop ds
+ 	mov	es,current_dos		; internationalise the yes/no chars
+@@ -528,6 +544,7 @@
+ 	mov	mem_current_base,ax	; Base of allocated memory
+ 	mov	mem_current,ax		; Next available Segment
+ 
++	mov	byte ptr configPass,0
+ 	call	config_finish		; Update DOS with the information
+ 					; obtained from loading the resident
+ 					; drivers.
+@@ -578,17 +595,44 @@
+ 	add	ax,15			; round LDT's size up to para
+ 	shr	ax,cl
+ 	mov	dl,'L'			; allocate LDT's
++	mov	dh,lastdrvIn
+ 	call	alloc_instseg		; Allocate memory AX is destination
+-	mov	es:F52_PATHOFF[bx],0	; point at the LDT's
++
++	push	di
++	push	ax
++	xchg	ax,cx
++	mov	al,LDT_LEN
++	mov	ah,es:F52_LASTDRV[bx]
++	cmp	ah,26
++	 jbe	config_end20
++	mov	ah,26
++config_end20:
++	mul	ah
++	xchg	ax,cx
++	push	ds
++	push	es
++	lds	si,es:F52_PATHPTR[bx]
++	mov	es,ax
++	rep	movsb
++	pop	es
++	pop	ds
++	pop	ax
++	pop	di
++
++	mov	es:F52_PATHOFF[bx],di	; point at the LDT's
+ 	mov	es:F52_PATHSEG[bx],ax	; save seg we just allocated
+ 	pop	es
+ 
+-	call	setup_ldt		; initialise LDT structures
++;	call	setup_ldt		; initialise LDT structures
+ 
+ 	call	setup_stacks		; allocate stacks
+ 
+ 	call	relocate_system		; relocate system as requested
+ 
++	mov	configpass,2
++	mov	cfg_head,0
++	call	preload_done
++
+ 	push	es			; Free all of the unused memory
+ 	mov	es,mem_current_base	; ES: Base Allocated Memory
+ 	mov	bx,mem_current		; Get the currently allocated memory
+@@ -684,10 +728,13 @@
+ relocate_system10:
+ 	call	reloc_bios		; move down relocatable drivers
+ 	call	reloc_dos		; move DOS above drivers if RAM based
++	call	reloc_dosdata
++	call	reloc_xbda
+ 	xor	cx,cx
+ 	xchg	cx,commandHMA
+ 	call	FreeHMA			; return command.com HMA space to pool
+ 	cli
++	mov	es,int_stubs_seg
+ 	mov	ds,dos_dseg		; DS -> DOS data segment
+ 	callf	cs:dos_init		; (in case of CS relative fixups)
+ 	sti
+@@ -702,12 +749,13 @@
+ 	test	init_flags,INIT_ROMCODE	; Run the DOS code in ROM
+ 	 jz $+5 ! jmp reloc_dos90	; at CURRENT_DOS - No Code Reloc
+ 	mov	es,current_dos
++	mov	dx,es:DOS_OFFSET
+ 	mov	cx,es:DOS_CODE		; get DOS code size in bytes
+ 	mov	ax,dos_target_seg	; get DOS target
+ 	cmp	ax,0FFFFh		; it it seg FFFF ?
+ 	 jne	reloc_dos10
+-	mov	es,current_dos
+-	mov	dx,es:DOS_OFFSET
++;	mov	es,current_dos
++;	mov	dx,es:DOS_OFFSET
+ 	call	AllocHMA		; allocate CX bytes, offset < DX
+ 	 jnc	reloc_dos50		;  if we can use high memory
+ 	xor	ax,ax			; can't, so try auto-allocation
+@@ -725,16 +773,16 @@
+ 	 jnc	reloc_dos40		;  in upper memory if possible
+ reloc_dos20:
+ 	mov	es,current_dos		; if conventional memory we
+-	mov	ax,es:INIT_CODE		;  can discard INIT code
+-	cmp	history_flg,0		; is history enabled ?
+-	 jne	reloc_dos30
+-	mov	ax,es:HISTORY_CODE	; no, discard history code as well
+-reloc_dos30:
+-	push	cx
+-	add	ax,15
+-	mov	cl,4			; convert to paragraphs
+-	shr	ax,cl
+-	pop	cx
++;	mov	ax,es:INIT_CODE		;  can discard INIT code
++;	cmp	history_flg,0		; is history enabled ?
++;	 jne	reloc_dos30
++;	mov	ax,es:HISTORY_CODE	; no, discard history code as well
++;reloc_dos30:
++;	push	cx
++;	add	ax,15
++;	mov	cl,4			; convert to paragraphs
++;	shr	ax,cl
++;	pop	cx
+ 	call	alloc_seg_with_padding	; allocate in conventional memory
+ reloc_dos40:
+ 	xchg	ax,dx			; save segment address
+@@ -764,7 +812,212 @@
+ 	pop	ds
+ 	ret
+ 
++reloc_dosdata:
++	push	es			; save ES
+ 
++	mov	ax,DDSC_LEN		;length of DDSC structure
++	mul	res_dev_count		; * number of resident devices
++	push	ax
++	test	hiddscs,DDSCS_IN_HMA	; is HMA usage enabled?
++	 jz	reloc_data20		; no, skip it
++	push	es
++	push	ax
++	call	SetupHMA		; prepare HMA
++	pop	cx
++	mov	dx,0ffffh
++	call	AllocHMA		; and try to allocate CX bytes there
++	 jc	reloc_data10		; did not work, try other mem instead
++	mov	ax,es
++	pop	es
++	jmps	reloc_data50
++reloc_data10:
++	pop	es
++reloc_data20:
++	pop	ax
++	push	ax
++	mov	cl,4			; convert bytes to paragraphs
++	add	ax,15			; and round it
++	shr	ax,cl
++	mov	dl,'M'			; MCB type
++	test	hiddscs,DDSCS_IN_UMB	; is upper mem usage enabled
++	 jz	reloc_data30		; no, try low mem instead
++	call	alloc_hiseg		; try to allocate upper mem
++	 jnc	reloc_data40		; if it did not work, try low
++reloc_data30:
++	call	alloc_seg		; allocate low mem
++reloc_data40:
++	xor	di,di
++reloc_data50:
++	mov	es,ax			; mem position is at ES:DI
++	pop	cx
++	mov	dx,di
++	push	ds
++	lds	si,res_ddsc_ptr		; copy DDSCs there
++	rep	movsb
++	pop	ds
++	mov	di,dx
++	mov	cl,res_dev_count
++	push	ds
++	push	es
++	les	bx,func52_ptr
++	lds	si,es:F52_PATHPTR[bx]
++	pop	es
++reloc_data60:				; fix up new DDSC addresses in LDTs
++	mov	ds:word ptr LDT_PDT[si],di
++	mov	ds:word ptr LDT_PDT+2[si],ax
++	cmp	cl,1			; and in DDSCs
++	 je	reloc_data65		; skip last one
++	mov	es:word ptr DDSC_LINK[di],di
++	add	es:word ptr DDSC_LINK[di],DDSC_LEN
++	mov	es:word ptr DDSC_LINK+2[di],ax
++reloc_data65:
++	add	di,DDSC_LEN		; next DDSC
++	add	si,LDT_LEN		; next LDT
++	loop	reloc_data60
++	pop	ds
++	mov	res_ddsc_seg,ax		; fix up pointers in DOS data segment
++	mov	res_ddsc_off,dx
++	les	bx,func52_ptr
++	mov	es:word ptr F52_DDSCPTR+2[bx],ax
++	mov	es:word ptr F52_DDSCPTR[bx],dx
++
++	mov	ax,dosdata_len		; length of DOS data segment
++	mov	cl,4			; convert this to paragraphs
++	add	ax,15
++	shr	ax,cl
++	mov	dl,'M'			; MCB type
++	test	hidosdata,DOSDATA_IN_UMB ; shall the DOS data go high?
++	 jz	reloc_data70		; no, then try low mem instead
++	call	alloc_hiseg		; try to allocate upper mem
++	 jnc	reloc_data80		; did not work, try low instead
++reloc_data70:
++	call	alloc_seg		; allocate low
++reloc_data80:
++	mov	cx,dosdata_len		; copy the DOS data segment to new location
++	mov	es,ax
++	xor	di,di
++	xor	si,si
++	push	ds
++	mov	ds,dos_dseg
++	rep	movsb
++	pop	ds
++	mov	dos_dseg,ax		; and fix up the pointers
++	mov	drdos_seg,ax
++	mov	func52_seg,ax
++	xor	di,di
++	mov	es,di
++	mov	es:INT31_SEGMENT,ax
++
++	pop	es			; restore ES again
++	ret
++
++reloc_xbda:
++	cmp	hixbda,0		; shall the XBDA be moved?
++	 jne	reloc_xbda02		; yes
++	jmp	reloc_xbda140		; no, nothing to do
++reloc_xbda02:
++	push	es			; save ES
++	mov	ax,40h			; address of BIOS data area
++	mov	es,ax
++	mov	bx,0
++	mov	ax,es:0eh[bx]		; segment address of XBDA if one exists
++	cmp	ax,mem_size		; is it at the top of conventional mem?
++	 je	reloc_xbda03		; yes, go on
++	jmp	reloc_xbda130		; no, then moving it is no good
++reloc_xbda03:
++	mov	es,ax			; ES = XBDA segment
++	xor	ah,ah
++	mov	al,es:[bx]		; length of XBDA in kilobytes
++	mov	cl,6			; make this paragraphs
++	shl	ax,cl
++	mov	cx,ax
++	mov	dx,es
++	add	ax,dx			; end of XBDA
++	cmp	ax,0a000h		; is it just before the video RAM?
++	 je	reloc_xbda05		; yes, that is just what we want
++	jmp	reloc_xbda130		; if not, do not move it
++reloc_xbda05:
++	mov	dl,'M'			; MCB type
++	mov	ax,cx
++	test	hixbda,MOVE_XBDA_HIGH	; shall we try to move it to upper mem?
++	 jz	reloc_xbda10		; no
++	call	alloc_upper		; try to allocate in upper mem
++	 jnc	reloc_xbda20		; did not work, try low instead
++reloc_xbda10:
++	test	hixbda,MOVE_XBDA_LOW	; shall we move it to low base mem?
++	 jnz	reloc_xbda15		; yes
++	jmp	reloc_xbda130		; no, then just leave it where it is
++reloc_xbda15:
++	call	alloc_seg		; allocate low mem
++reloc_xbda20:
++	xor	bx,bx
++	xchg	ax,dx
++	xor	ah,ah
++	mov	al,es:[bx]		; length of XBDA in kilobytes
++	mov	cl,10			; make this bytes instead
++	shl	ax,cl
++	xchg	ax,cx
++	push	ds
++	push	es			; copy it to new position
++	pop	ds
++	mov	es,dx
++	xor	di,di
++	xor	si,si
++	rep	movsb
++	mov	ax,40h			; and update the BIOS data area with the new address
++	mov	ds,ax
++	mov	ds:0eh[bx],es
++	pop	ds
++	les	bx,func52_ptr		; now get the start of the MCB chain
++	mov	es,es:F52_DMDROOT[bx]
++	mov	si,mem_size
++	dec	si
++reloc_xbda30:
++	mov	ax,es
++	mov	di,ax
++	add	ax,es:DMD_LEN		; and check them to find the right one
++	inc	ax
++	cmp	di,si			; is this the one that includes the old XBDA?
++	 je	reloc_xbda40		; yes
++	cmp	ax,si			; already past the right position?
++	 ja	reloc_xbda130		; that cannot be helped
++	mov	es,ax			; get the address of the next MCB
++	cmp	es:DMD_ID,IDZ		; already the last one?
++	 jne	reloc_xbda30		; no, try again
++	jmps	reloc_xbda130		; did not find it
++reloc_xbda40:
++	push	ax			; save length of old MCB
++	push	es:DMD_PSP		; and the old PSP pointer
++	mov	ch,es:DMD_ID		; and also its ID code
++	mov	ax,09fffh		; compute the new length
++	sub	ax,di
++	dec	ax
++	mov	es:DMD_LEN,ax		; and update the MCB accordingly
++	mov	es:DMD_PSP,0		; make this free mem
++	mov	es:word ptr DMD_NAME,'S'+256*'D'
++	mov	es:DMD_NAME+2,0
++	mov	es:DMD_ID,IDM		; there surely follows another one
++	mov	ax,09fffh		; this is where the system area starts now
++	mov	es,ax
++	mov	es:DMD_ID,ch		; use these values from the old MCB
++	pop	es:DMD_PSP
++	pop	ax
++	sub	ax,9fffh
++	dec	ax
++	mov	es:DMD_LEN,ax		; and this is the new length
++	les	bx,func52_ptr		; update the upper memory chain
++	mov	es:F52_DMD_UPPER[bx],9fffh
++	les	bx,drdos_ptr
++	mov	es:DRDOS_DMD_UPPER[bx],9fffh
++	mov	mem_size,0a000h		; and the base mem top
++	mov	ax,40h			; also update the new base mem size
++	mov	es,ax			; in the BIOS data area
++	mov	bx,13h
++	mov	es:[bx],640
++reloc_xbda130:
++	pop	es			; restore ES again
++reloc_xbda140:
++	ret
+ 
+ 	Public	HookInt2F
+ 
+@@ -1138,7 +1391,7 @@
+ 	pop	cx
+ 	pop	bx
+ 	pop	ax
+-	 jnz	alloc_hiseg		; no, allocate normally
++	 jnz	alloc_instseg20		; no, allocate normally
+ 	push	ax
+ 	push	bx
+ 	push	cx
+@@ -1150,15 +1403,49 @@
+ 	pop	dx
+ 	pop	cx
+ 	pop	bx
+-	 jc	alloc_intseg10		; did we get any ?
++	 jc	alloc_instseg10		; did we get any ?
+ 	add	sp,WORD
++	xor	di,di
+ 	clc				; we've done it !!
+ 	ret	
+ 
+-alloc_intseg10:
++alloc_instseg10:
+ 	pop	ax			; we didn't manage it...
+ ;	jmp	alloc_hiseg
+ 
++alloc_instseg20:
++	push	bx
++	test	dh,ALLOC_IN_HMA
++	 jz	alloc_instseg30
++	push	es
++	push	ax
++	mov	cl,4			; convert paragraphs to bytes
++	shl	ax,cl
++	push	ax
++	call	SetupHMA		; make sure HMA chain is established
++	pop cx				; CX = bytes wanted
++	mov	dx,0FFFFh		; anywhere is OK
++	call	AllocHMA		; ES:DI -> allocated data
++	pop	ax
++	 jc	alloc_instseg25
++	mov	ax,es
++	pop	es
++	jmps	alloc_instseg55
++alloc_instseg25:
++	pop	es
++alloc_instseg30:
++	test	dh,ALLOC_IN_UMB
++	 jz	alloc_instseg40		; allocation from UMB's OK ?
++	call	alloc_upper		; yes, try and allocate memory there
++	 jnc	alloc_instseg50
++alloc_instseg40:
++	call	alloc_seg		; allocate memory in bottom 640 K
++alloc_instseg50:
++	xor	di,di
++alloc_instseg55:
++	pop	bx
++	ret
++
+ 	Public	alloc_hiseg
+ alloc_hiseg:
+ ; allocate AX paragraphs in high memory if possible, otherwise allocate
+@@ -1230,6 +1517,7 @@
+ 	hlt				; ##jc##
+ 	jmps	alloc_s10
+ 
++	Public	alloc_upper
+ alloc_upper:
+ ;-----------
+ ; On Entry:
+@@ -1343,12 +1631,12 @@
+ 	cmp	es:DMD_PSP,0008		; if system mark as SC
+ 	 jne	mark_sm40
+ 	xor	ax,ax			; zero rest for cosmetic reasons
+-	mov	ds:word ptr DMD_NAME-3,ax
+-	mov	ds:word ptr DMD_NAME-2,ax
+-	mov	ds:word ptr DMD_NAME,'S'+256*'C'
+-	mov	ds:word ptr DMD_NAME+2,ax
+-	mov	ds:word ptr DMD_NAME+4,ax
+-	mov	ds:word ptr DMD_NAME+6,ax
++	mov	es:word ptr DMD_NAME-3,ax
++	mov	es:word ptr DMD_NAME-2,ax
++	mov	es:word ptr DMD_NAME,'S'+256*'C'
++	mov	es:word ptr DMD_NAME+2,ax
++	mov	es:word ptr DMD_NAME+4,ax
++	mov	es:word ptr DMD_NAME+6,ax
+ mark_sm40:
+ 	cmp	es:DMD_ID,'Z'		; is it the last DMD ?
+ 	 je	mark_sm50		;  then stop
+@@ -1590,6 +1878,10 @@
+ 	extrn	history_flg:byte
+ 	extrn	next_drv:byte
+ 	extrn	dev_count:byte
++	extrn	lastdrvIn:byte
++	extrn	configPass:byte
++	extrn	part_off:word
++	extrn	cfg_head:word
+ 
+ ;
+ ;	PUBLIC Variables which are initialised by the BIOS before the
+@@ -1611,6 +1903,7 @@
+ 	Public	res_ddsc_ptr
+ res_ddsc_ptr	rd	0
+ res_ddsc_off	dw	0
++	Public	res_ddsc_seg
+ res_ddsc_seg	dw	0
+ 
+ 	Public	rcode_offset, rcode_seg, icode_len, rcode_len, rcode_fixups
+@@ -1671,7 +1964,7 @@
+ IF DRDOS35
+ dos_name	db	'DRBDOS  SYS',0 
+ ELSE
+-dos_name	db	'IBMDOS  COM',0	; default DOS filename
++dos_name	db	'DRDOS   SYS',0	; default DOS filename
+ ENDIF
+ 
+ rpl_name	db	'RPLOADER'
+@@ -1715,6 +2008,13 @@
+ himem_base	dw	0		; base of HIMEM seg allocations
+ himem_size	dw	0		; length of HIMEM seg allocations
+ 
++	Public	hidosdata
++hidosdata	db	0
++	Public	hiddscs
++hiddscs		db	0
++	Public	hixbda
++hixbda		db	0
++
+ 	Public	last_drv
+ 
+ last_drv	db	5		; default is "E:"
+@@ -1740,8 +2040,10 @@
+ 		rd	1		; CS:IP
+ 
+ 	Public	shell_cline
++;shell_cline	db	length shell_drv; Initial Command Line
++;shell_drv	db	'A: /P'
+ shell_cline	db	length shell_drv; Initial Command Line
+-shell_drv	db	'A: /P'
++shell_drv	rb	0
+ 		db	0Dh
+ 		rb	126 - length shell_drv
+ 
+@@ -1765,6 +2067,9 @@
+ 		rw	384		; big stack for ASPI4DOS.SYS driver
+ stack		rw	0
+ 
++res_dev_count	db	0
++dosdata_len	dw	0
++int_stubs_seg	dw	0
+ 
+ INITPSP		DSEG	PARA 'INITDATA'
+ 		db	'Z'			; dummy DMD header
+diff -u -P -r dr70106/drbio/biosmsgs.asm dr70107/drbio/biosmsgs.asm
+--- dr70106/drbio/biosmsgs.asm	2003-12-29 20:46:22.000000000 +0000
++++ dr70107/drbio/biosmsgs.asm	2005-03-06 19:23:06.000000000 +0000
+@@ -31,7 +31,7 @@
+ 	public	_starting_dos_msg
+ 	public	starting_dos_msg
+ starting_dos_msg	label	byte
+-_starting_dos_msg	db	CR, LF, "Starting DR-DOS 7.01.06", CR, LF, NUL
++_starting_dos_msg	db	CR, LF, "Starting Enhanced DR-DOS 7.01.07 (6.3.2005)", CR, LF, NUL
+ 	public	_lba_supp_msg
+ 	public	lba_supp_msg
+ lba_supp_msg		label	byte
+diff -u -P -r dr70106/drbio/bpb.equ dr70107/drbio/bpb.equ
+--- dr70106/drbio/bpb.equ	2003-08-08 02:10:36.000000000 +0000
++++ dr70107/drbio/bpb.equ	2004-10-26 14:23:36.000000000 +0000
+@@ -54,4 +54,21 @@
+ BPB		ends
+ 
+ BPB_LENGTH	equ	size BPB
+-OLD_BPB_LENGTH	equ	31
++
++OLDBPB		struc
++OLDBPB_SECSIZ	dw	?	; # of bytes per sector 
++OLDBPB_ALLOCSIZ	db	?	; # of sectors per allocation unit
++OLDBPB_FATADD	dw	?	; # of reserved sectors (1)
++OLDBPB_NFATS	db	?	; # of fats
++OLDBPB_DIRMAX	dw	?	; # of directory entries
++OLDBPB_TOTSEC	dw	?	; # of sectors total in image
++OLDBPB_FATID	db	?	;  holds a copy of the fat id byte
++OLDBPB_FATSEC	dw	?	; # of sectors in a fat
++OLDBPB_SPT	dw	?	; # of sectors per track
++OLDBPB_HEADS	dw	?	; # of heads
++OLDBPB_HIDDEN	dd	?	; disk offset (32 bit)
++OLDBPB_SIZE	dd	?	; disk size (32 bit)
++OLDBPB_RESRVD2	db	6 dup (?)
++OLDBPB		ends
++
++OLDBPB_LENGTH	equ	size OLDBPB
+diff -u -P -r dr70106/drbio/config.a86 dr70107/drbio/config.a86
+--- dr70106/drbio/config.a86	2003-07-20 01:53:48.000000000 +0000
++++ dr70107/drbio/config.a86	2004-12-11 18:38:50.000000000 +0000
+@@ -75,8 +75,9 @@
+ 	extrn	AllocHMA:near
+ 	extrn	SetupHMA:near
+ 	extrn	alloc_instseg:near	; Allocate "Segment" Instance Memory
+-	extrn	alloc_hiseg:near	; Allocate "Segment" High Memory
++	extrn	alloc_hiseg:near	; Allocate "Segment" Upper or Low Memory, depending on hidos flag
+ 	extrn	alloc_seg:near		; Allocate "Segment" Memory
++	extrn	alloc_upper:near	; Allocate "Segment" Upper Memory
+ 	extrn	config_process:near
+ 	extrn	InitStacks:near
+ 	extrn	HookInt2F:near
+@@ -157,6 +158,7 @@
+ 
+ 	call	SetupDeblocking		; do our thing with deblocking
+ 
++	mov	byte ptr configPass,1
+ 	call	config_finish		; clean up configuration
+ 	call	setup_fopen		; allocate disk hashing
+ 	call	setup_history
+@@ -383,6 +385,7 @@
+ 	push	ax			; save buffers size in bytes
+ 	shr	ax,cl			; convert to para's
+ 	mov	dl,'H'			; History buffer
++	mov	dh,ALLOC_IN_UMB
+ 	call	alloc_instseg		; Allocate Buffer
+ 	mov	es:word ptr 00[si],ax	; Buffer Start Address
+ 	pop	cx			; recover buffer size in bytes
+@@ -548,7 +551,13 @@
+ 	push ds ! pop es		; ES -> Points at the Data Segment
+ 	mov	ds,strategy_seg		; DS == Device Drive Segment
+  	mov	si,di			; DS:SI -> device driver header
++	push	ds
++	push	es
+  	callf	cs:strategy		; Call Device Strategy Routine
++	pop	es
++	pop	ds
++	mov	ax,ds:DH_INTERRUPT[si]	; Set up the INTERRUPT Entry Point
++	mov	es:interrupt_off,ax
+ 	callf	cs:interrupt		; Call Device Interrupt Routine
+ 	pop di ! pop si ! pop bx	; recover the pointers
+ 	pop es ! pop ds			; Restore Segment Registers
+@@ -661,6 +670,7 @@
+ ; Allocate DDSC's for the resident device drivers - we can only do this
+ ; after the DOS data area is established.
+ ;
++	push	word ptr res_ddsc_ptr
+ 	sub	bx,bx			; start with 1st block device
+ 	mov	cx,num_blkdev		; get # of block devices
+ 	 jcxz	res_ddsc40		; skip if no block devices
+@@ -697,6 +707,7 @@
+ 	inc	bx
+ 	loop	res_ddsc10		; repeat for next driver
+ res_ddsc40:				; all block devices done
++	pop	word ptr res_ddsc_ptr
+ 	ret
+ 
+ 	
+@@ -758,11 +769,12 @@
+ 	mov	al,es:F52_LASTDRV[bx]	; lastdrive
+ 	push	ax			; save for later
+ 	les	di,es:F52_PATHPTR[bx]	; now initialise the CSD's
++	mov	bx,di
+ 	xor	al,al			; to zero
+ 	rep	stosb			; zero them
+ 	pop	ax			; recover lastdrive
+ 
+-	xor	bx,bx			; start with zero offset
++;	xor	bx,bx			; start with zero offset
+ 	xor	cx,cx			; start with drive A
+ 	xchg	al,cl			; AH = physical limit, CX logical limit
+ ldt_init:
+@@ -880,10 +892,13 @@
+ 	mov	resdev_off,-1		; only do this once...
+ cfg_fin10:
+ 
++	cmp	byte ptr configPass,0	; skip if second pass
++	 jne	cfg_fin20
+ 	les	bx,func52_ptr		; ES:BX -> base of DOS variables
+ 	call	setup_drives		; Update No of Physical Drives in case
+ 					; this is the first pass
+ 	call	setup_ldt		; setup the ldt's
++cfg_fin20:
+ 	les	bx,func52_ptr
+ 	lea	di,F52_CLKDEV[bx]	; ES:DI -> clock ptr, console ptr
+ 	mov	si,offset clkdev_off	; DS:SI -> local pointer values
+@@ -892,6 +907,19 @@
+ 	movsw				; set offset of console device driver
+ 	movsw				; set segment of console device driver
+ 
++	push	num_files
++	push	num_fcbs
++	mov	al,filesIn
++	push	ax
++	mov	num_fcbs,MIN_NUM_FCBS
++	mov	num_files,MIN_NUM_FILES
++	mov	filesIn,0
++	call	setup_doshndl
++	pop	ax
++	mov	filesIn,al
++	pop	num_fcbs
++	pop	num_files
++
+ 	call	setup_doshndl		; Allocate DOS compatible Handles
+ 					; NB must immediately follow devices !
+ 	call	setup_buffers		; allocate the requested #
+@@ -958,7 +986,7 @@
+ 	mov	dl,'B'			; allocate as a Buffer
+ 	test	buffersIn,BUFFERS_IN_UMB
+ 	 jz	setup_b50		; allocation from UMB's OK ?
+-	call	alloc_hiseg		; yes, try and allocate memory there
++	call	alloc_upper		; yes, try and allocate memory there
+ 	 jnc	setup_b60
+ setup_b50:
+ 	call	alloc_seg		; allocate memory in bottom 640 K
+@@ -999,7 +1027,7 @@
+ 	mov	cl,4
+ 	shr	ax,cl			; convert to para size
+ 	mov	dl,'B'			; allocate as a Buffer
+-	call	alloc_seg		; allocate a deblocking buffer
++	call	alloc_hiseg		; allocate a deblocking buffer
+ 	mov	es:F52_DEBLOCK[bx],ax
+ 	les	bx,drdos_ptr		; ES:BX -> data area
+ 	mov	es:DRDOS_DEBLOCK[bx],ax	;  of deblocking buffer
+@@ -1028,15 +1056,45 @@
+ 
+ 	mov	ax,DHNDL_LEN			; How many bytes do we need
+ 	mul	cx				; for the structure
+-	mov	dx,ax				; including the control
++	add	ax,DCNTRL_LEN			; including the control
++	mov	dx,ax
+ 
+-	add	ax,DCNTRL_LEN+15		; Ensure the new structure is
++	test	filesIn,FILES_IN_HMA
++	 jz	setup_dh23
++	push	es
++	push	bx
++	push	ax
++	push	cx
++	push	dx
++	call	SetupHMA			; make sure HMA chain is established
++	pop cx ! push cx			; CX = bytes wanted
++	mov	dx,0FFFFh			; anywhere is OK
++	call	AllocHMA			; ES:DI -> allocated data
++	pop	dx
++	pop	cx
++	pop	ax
++	pop	bx
++	 jc	setup_dh22
++	mov	ax,es
++	pop	es
++	jmps	setup_dh27
++setup_dh22:
++	pop	es
++setup_dh23:
++	add	ax,15				; Ensure the new structure is
+ 	shr ax,1 ! shr ax,1			; a paragraph value
+ 	shr ax,1 ! shr ax,1			; allocate some memory
+ 	mov	dl,'F'				; allocate for Files
+-    call    alloc_seg           
+-
+-	mov	es:DCNTRL_DSOFF[bx],0		; link the new seg
++	test	filesIn,FILES_IN_UMB		; UMB usage activated?
++	 jz	setup_dh25			; no, use conventional mem
++	call	alloc_upper			; then try to move them there first
++	 jnc	setup_dh26			; if upper fails, try low mem
++setup_dh25:
++	call    alloc_seg           
++setup_dh26:
++	xor	di,di
++setup_dh27:
++	mov	es:DCNTRL_DSOFF[bx],di		; link the new seg
+ 	mov	es:DCNTRL_DSSEG[bx],ax		; to the end of the list
+ 	
+ ; We can now initialise the new structure
+@@ -1062,7 +1120,8 @@
+ 	push	es ! push bx
+ 	les	bx,func52_ptr		; ES:BX -> base of DOS variables
+ 	mov	es:F52_PHYDRV[bx],al	; set # of Physical drives installed
+-	mov	es:F52_LASTDRV[bx],al	; set # of Logical drives installed
++;	mov	es:F52_LASTDRV[bx],al	; set # of Logical drives installed
++	mov	es:F52_LASTDRV[bx],26	; set # of Logical drives installed
+ 	pop	bx ! pop es
+ 	ret
+ 
+@@ -1173,11 +1232,14 @@
+ 	stosb
+ 	loop	build_cl1
+ 	mov	al,CR		; indicate we can go no more....
++	jmps	build_cl4
+ build_cl2:
+ 	cmp	al,CR		; it it really the end ?
+ 	mov	al,' '		; now insert a space character
+ 	stosb
+ 	 je	build_cl_exit	; CR meant it's time to go
++	cmp	byte ptr -1[si],' '
++	 je	build_cl3
+ 	dec	si		; rewind the source one character	
+ build_cl3:
+ 	lodsb			; Copy the tail
+@@ -1259,7 +1321,6 @@
+ 
+ 
+ 
+-
+ include	initmsgs.def				; Include TFT Header File
+ 
+ 
+@@ -1275,6 +1336,7 @@
+ 	Public	max_clsize, init_buf, num_read_ahead_buf
+ 	Public	buffersIn, history_flg, history_size
+ 	Public	dbcs_tbl, ctry_info, boot_device, boot_drv, resdev_chain
++	Public	filesIn, stacksIn, lastdrvIn
+ 
+ 
+ history_flg	db	0	; Disable history buffers to save RAM
+@@ -1285,7 +1347,11 @@
+ 	
+ init_buf	db	MIN_NUM_BUFFS	; default # of buffers
+ num_read_ahead_buf db	DEF_READ_AHEAD	; default # of read-ahead
+-buffersIn	db	0		; default is low
++buffersIn	db	0		; desired location of buffers, default is low
++
++filesIn		db	0		; desired location of file handles, default is low
++stacksIn	db	0		; desired location of stacks, default is low
++lastdrvIn	db	0		; desired location of LDT, default is low
+ 
+ dev_count	db	0		; count of new drives (used by preload)
+ next_drv	db	0		; Next Drive to Allocate
+@@ -1405,5 +1471,7 @@
+ 	Public	DeblockSetByUser
+ DeblockSetByUser	db	FALSE
+ 
++	Public	configPass
++configPass		db	0
+ 
+ 	end
+diff -u -P -r dr70106/drbio/config.equ dr70107/drbio/config.equ
+--- dr70106/drbio/config.equ	1997-04-16 11:54:16.000000000 +0000
++++ dr70107/drbio/config.equ	2004-09-07 23:01:34.000000000 +0000
+@@ -114,6 +114,26 @@
+ BUFFERS_IN_HMA	equ	0000$0001b
+ BUFFERS_IN_UMB	equ	0000$0010b
+ 
++FILES_IN_HMA	equ	0000$0001b
++FILES_IN_UMB	equ	0000$0010b
++
++STACKS_IN_HMA	equ	0000$0001b
++STACKS_IN_UMB	equ	0000$0010b
++
++LASTDRV_IN_HMA	equ	0000$0001b
++LASTDRV_IN_UMB	equ	0000$0010b
++
++DDSCS_IN_HMA	equ	0000$0001b
++DDSCS_IN_UMB	equ	0000$0010b
++
++DOSDATA_IN_UMB	equ	0000$0010b
++
++ALLOC_IN_HMA	equ	0000$0001b
++ALLOC_IN_UMB	equ	0000$0010b
++
++MOVE_XBDA_LOW	equ	0000$0001b
++MOVE_XBDA_HIGH	equ	0000$0010b
++
+ DMD_ID          equ     es:byte ptr .0	; id code ('M' or 'Z')
+ DMD_PSP         equ     es:word ptr .1	; owner of memory block
+ DMD_LEN         equ     es:word ptr .3	; length of memory block
+diff -u -P -r dr70106/drbio/disk.asm dr70107/drbio/disk.asm
+--- dr70106/drbio/disk.asm	2003-11-06 15:29:34.000000000 +0000
++++ dr70107/drbio/disk.asm	2004-12-08 13:18:54.000000000 +0000
+@@ -856,9 +856,9 @@
+ 	xor	dl,dl			; isolate head bits
+ 	xchg	dh,dl
+ 	inc	dx
+-	mov	max_head,dx		; number of heads on this drive
++	mov	cs:max_head,dx		; number of heads on this drive
+ 	and	cx,3fh			; isolate sector bits
+-	mov	max_sect,cx		; number of sectors per track on this drive
++	mov	cs:max_sect,cx		; number of sectors per track on this drive
+ 	popx	<di,es,dx,cx>
+ 	ret
+ 
+@@ -881,16 +881,16 @@
+ 	rol	ah,1
+ 	mov	bl,dh			; isolate head bits
+ 	xor	bh,bh
+-	mul	max_head		; multiply with number of heads
++	mul	cs:max_head		; multiply with number of heads
+ 	add	ax,bx			; add head number
+ 	adc	dx,0
+ 	push	ax
+ 	mov	ax,dx			; multiply with sectors per track
+-	mul	max_sect
++	mul	cs:max_sect
+ 	mov	word ptr [si+10],ax
+ 	mov	word ptr [si+12],dx
+ 	pop	ax
+-	mul	max_sect
++	mul	cs:max_sect
+ 	and	cx,3fh			; isolate sector bits
+ 	dec	cx
+ 	mov	word ptr [si+8],cx	; add products and sector number
+@@ -914,14 +914,14 @@
+ 	push	dx			; save unit number
+ 	mov	dx,0			; divide high word of LBA block number
+ 	mov	ax,word ptr [si+10]
+-	div	max_sect
++	div	cs:max_sect
+ 	push	ax			; high word of quotient
+ 	mov	ax,word ptr [si+8]	; divide low word & remainder
+-	div	max_sect
++	div	cs:max_sect
+ 	mov	cx,dx			; remainder = sector number
+ 	inc	cx			; sector count starts with 1
+ 	pop	dx			; get high word
+-	div	max_head		; divide through number of heads
++	div	cs:max_head		; divide through number of heads
+ 	ror	ah,1			; convert cylinder and sector number to CHS format
+ 	ror	ah,1
+ 	xchg	ah,al
+@@ -1469,7 +1469,13 @@
+ 	call	point_unit		; get unit descriptor
+ 
+ 	cmp	ch,8			; is it the right major category?
+-	 jne	ioctl20			; no, return an error
++	 je	ioctl5			; yes, proceed
++	cmp	ch,48h			; else check for cat 48h (FAT32)
++	 jne	ioctl20			; neither one, return an error
++ioctl5:
++
++	mov	cs:byte ptr ioctl_cat,ch
++					; save category code for later use
+ 
+ 	or	es:UDSC_FLAGS[di],UDF_UNSURE
+ 					; media unsure after IOCTL
+@@ -1506,8 +1512,18 @@
+ 	dw	offset CGROUP:ioctl_getmedia
+ 	db	RQ19_SETMEDIA		; set media id
+ 	dw	offset CGROUP:ioctl_setmedia
++	db	RQ19_LOCKLOG
++	dw	offset CGROUP:ioctl_locklogical
++	db	RQ19_LOCKPHYS
++	dw	offset CGROUP:ioctl_lockphysical
++	db	RQ19_UNLOCKLOG
++	dw	offset CGROUP:ioctl_unlocklogical
++	db	RQ19_UNLOCKPHYS
++	dw	offset CGROUP:ioctl_unlockphysical
+ 	db	0			; terminate the list
+ 
++ioctl_cat	db	0		; category code for dd_geniotcl
++
+ point_ioctl_packet:
+ ;------------------
+ ; On Entry:
+@@ -1558,8 +1574,14 @@
+ 	pop	es
+ 	lea	di,7[bx]		; ES:DI -> BPB in parameter block
+ 	pop	ds			; DS:SI -> BPB to copy
+-;	mov	cx,UDSC_BPB_LENGTH
+-	mov	cx,OLD_BPB_LENGTH
++	cmp	cs:byte ptr ioctl_cat,48h
++					; extended BPB requested?
++	 je	get2			; yes
++	mov	cx,OLDBPB_LENGTH	; no, use old-style BPB
++	jmps	get3
++get2:
++	mov	cx,UDSC_BPB_LENGTH	; else use extended BPB
++get3:
+ 	rep	movsb			; copy the BPB across to user
+ 	pop	di
+ 	pop	es
+@@ -1597,14 +1619,20 @@
+ set1:
+ 	lea	si,7[bx]		; DS:SI -> new BPB from user
+ 	xchg	ax,di			; ES:DI -> BPB in es:UDSC_
+-;	mov	cx,UDSC_BPB_LENGTH
+-	mov	cx,OLD_BPB_LENGTH
++	cmp	cs:byte ptr ioctl_cat,48h
++					; extended BPB supplied?
++	 je	set1a			; yes
++	mov	cx,OLDBPB_LENGTH	; no, copy old-style BPB
++	jmps	set1b
++set1a:
++	mov	cx,UDSC_BPB_LENGTH	; else copy extended BPB
++set1b:
+ 	rep	movsb			; copy BPB into UDSC as new default
+ 	xchg	ax,di			; ES:DI -> UDSC_ again
+ 
+ set2:					; now set track layout
+ ;	lea	si,BPB_LENGTH+7[bx]	; DS:SI -> new user layout
+-	lea	si,OLD_BPB_LENGTH+7[bx]	; DS:SI -> new user layout
++	lea	si,OLDBPB_LENGTH+7[bx]	; DS:SI -> new user layout
+ 	mov	es,cs:DataSegment
+ 	mov	di,CG:layout_table	; ES:DI -> BIOS layout table
+ 	lodsw				; get sector count
+@@ -1664,17 +1692,17 @@
+ 	mov	ax,ds:3[bx]		; get cylinder number
+ 	mov	P_CYL[bp],ax
+ 
+-	mul	max_head		; multiply with number of heads
++	mul	cs:max_head		; multiply with number of heads
+ 	xor	ch,ch
+ 	mov	cl,P_HEAD[bp]
+ 	add	ax,cx			; add head number
+ 	adc	dx,0
+ 	push	ax
+ 	mov	ax,dx			; multiply with sectors per track
+-	mul	max_sect
++	mul	cs:max_sect
+ 	mov	word ptr P_LBABLOCK[bp+2],ax
+ 	pop	ax
+-	mul	max_sect
++	mul	cs:max_sect
+ 	xor	ch,ch
+ 	mov	cl,P_SECTOR[bp]
+ 	dec	cl
+@@ -1986,6 +2014,13 @@
+ setmedia10:
+ 	ret
+ 
++ioctl_locklogical:
++ioctl_lockphysical:
++ioctl_unlocklogical:
++ioctl_unlockphysical:
++	xor	ax,ax			; return success
++	ret
++
+ rw_media:
+ ;--------
+ ; On Entry:
+@@ -2006,6 +2041,8 @@
+ 	xchg	ax,cx			; CX = sectors per cylinder
+ 	mov	ax,es:word ptr (UDSC_BPB+BPB_HIDDEN)[di]
+ 	mov	dx,es:word ptr (UDSC_BPB+BPB_HIDDEN+2)[di]
++	mov	word ptr P_LBABLOCK[bp],ax	; Logical Block Address of start sector
++	mov	word ptr P_LBABLOCK+2[bp],dx
+ 	div	cx			; AX = cylinder #, DX = head/sec offset
+ 	mov	P_CYL[bp],ax		; save physical cylinder number
+ 	xor	ax,ax			; make remainder 32 bit so
+@@ -2017,7 +2054,13 @@
+ 	 jc	rw_media20
+ 	cmp	local_buffer+11+BPB_FATID,0F0h
+ 	 jb	rw_media10
+-	mov	si,offset CGROUP:local_buffer+UDSC_BPB_LENGTH+11+2
++	cmp	word ptr local_buffer+11+BPB_DIRMAX,0	; FAT32 drive?
++	 jne	rw_media05		; no
++	mov	si,offset CGROUP:local_buffer+UDSC_BPB_LENGTH+11+14
++	jmps	rw_media07
++rw_media05:
++	mov	si,offset CGROUP:local_buffer+OLD_UDSC_BPB_LENGTH+11+2
++rw_media07:
+ 	lodsb				; get extended boot
+ 	sub	al,29h			; do we have an extended boot ?
+ 	 je	rw_media20		; no, well we can't write a new one
+@@ -2215,6 +2258,9 @@
+ driver	endp
+ 
+ 
++max_head	dw	0		; maximum number of heads
++max_sect	dw	0		; maximum sectors per track
++
+ RCODE	ends				; end of device driver code
+ 
+ page
+@@ -2964,7 +3010,8 @@
+ 	sbb	dx,0			; (note: 32 bytes per entry)
+ 	xor	cx,cx
+ 	mov	ch,BPB_ALLOCSIZ[bx]	; CX = (256 * # of clusters on drive)
+-	dec	cx
++;	dec	cx
++	dec	ch
+ 	add	ax,cx			; add in for rounding error
+ 	adc	dx,0
+ 	inc	cx
+@@ -3037,9 +3084,6 @@
+ int13ex_ver	dw	0		; version of int 13 extensions
+ int13ex_bits	dw	0		; int 13 API support bitmap
+ 
+-max_head	dw	0		; maximum number of heads
+-max_sect	dw	0		; maximum sectors per track
+-
+ ;	Public	diskaddrpack
+ ;diskaddrpack:				; disk address packet structure for LBA access
+ ;		db	10h		; size of packet
+diff -u -P -r dr70106/drbio/fdos.equ dr70107/drbio/fdos.equ
+--- dr70106/drbio/fdos.equ	2003-08-08 16:44:22.000000000 +0000
++++ dr70107/drbio/fdos.equ	2004-02-27 14:12:14.000000000 +0000
+@@ -125,16 +125,17 @@
+ DDSC_LINK	equ	dword ptr 25		; next drive's DDSC
+ DDSC_BLOCK	equ	word ptr 29		; next block to allocate
+ DDSC_FREE	equ	word ptr 31		; total free clusters on drive
+-DDSC_BDATADDR	equ	word ptr 33		; sector address of cluster #2 (32-bit)
+-DDSC_BCLSTRS	equ	dword ptr 37		; # of clusters on disk (32-bit)
+-DDSC_BFATRECS	equ	dword ptr 41		; # of sectors per FAT (32-bit)
+-DDSC_BBLOCK	equ	dword ptr 45		; next block to allocate (32-bit)
+-DDSC_BFREE	equ	dword ptr 49		; total free clusters on drive (32-bit)
+-DDSC_FSFLAGS	equ	word ptr 53		; FAT mirroring flags
+-DDSC_FSVER	equ	word ptr 55		; version of file system
+-DDSC_FSROOT	equ	dword ptr 57		; starting cluster of root directory
+-DDSC_FSINFO	equ	word ptr 61		; sector number of file system info block
+-DDSC_LEN	equ	63
++DDSC_BFREE	equ	dword ptr 33		; total free clusters on drive (32-bit)
++DDSC_FSFLAGS	equ	word ptr 37		; FAT mirroring flags
++DDSC_FSINFO	equ	word ptr 39		; sector number of file system info block
++DDSC_BOOTBAK	equ	word ptr 41		; sector number of backup boot sector
++DDSC_BDATADDR	equ	dword ptr 43		; sector address of cluster #2 (32-bit)
++DDSC_BCLSTRS	equ	dword ptr 47		; # of clusters on disk (32-bit)
++DDSC_BFATRECS	equ	dword ptr 51		; # of sectors per FAT (32-bit)
++DDSC_FSROOT	equ	dword ptr 55		; starting cluster of root directory
++DDSC_BBLOCK	equ	dword ptr 59		; next block to allocate (32-bit)
++DDSC_FSVER	equ	word ptr 63		; version of file system
++DDSC_LEN	equ	65
+ 
+ 
+ 
+diff -u -P -r dr70106/drbio/genercfg.a86 dr70107/drbio/genercfg.a86
+--- dr70106/drbio/genercfg.a86	1997-04-16 13:11:50.000000000 +0000
++++ dr70107/drbio/genercfg.a86	2004-12-12 22:30:26.000000000 +0000
+@@ -161,6 +161,7 @@
+ 	mov	preload_file,offset dblspace_file
+ 	call	preload_device		; STACKER failed, try DBLSPACE from C:
+ 
++	Public	preload_done
+ preload_done:
+ 	mov	ax,(MS_X_OPEN*256)+80h	; Open the configuration file
+ 	mov	dx,offset cfg_file	; Try Opening the file DCONFIG.SYS
+@@ -229,6 +230,18 @@
+ ;
+ 	push	si
+ 	push	di
++	cmp	configpass,2
++	 jb	cfg_query05
++	test	CFG_FLAGS[di],CF_LAST
++	stc
++	 jnz	cfg_query06
++	jmp	cfg_query90
++cfg_query05:
++	test	CFG_FLAGS[di],CF_LAST
++	stc
++	 jz	cfg_query06
++	jmp	cfg_query90
++cfg_query06:
+ 	test	CFG_FLAGS[di],CF_NOF	; are Function Keys allowed ?
+ ;	clc				; if not process the command
+ 	 jz $+5 ! jmp cfg_query90
+@@ -913,6 +926,9 @@
+ 	mov	dx,offset bad_shell
+ 	jmp	config_error
+ 
++func_hilastdrive:	; HILASTDRIVE=d:
++	or	lastdrvIn,LASTDRV_IN_HMA+LASTDRV_IN_UMB
++					; enable HMA and UMB usage for LDT
+ 
+ func_lastdrive:		; LASTDRIVE=d:
+ 	call	atoi			; are we supplying a decimal number?
+@@ -976,7 +992,8 @@
+ 
+ 
+ func_hibuffers:		; HIBUFFERS=nn[,nn]
+-	or	buffersIn,BUFFERS_IN_HMA
++	or	buffersIn,BUFFERS_IN_HMA+BUFFERS_IN_UMB
++					; enable HMA and UMB usage for disk buffers
+ ;	jmp	func_buffers
+ 
+ func_buffers:		; BUFFERS=nn[,nn]
+@@ -1008,6 +1025,9 @@
+ 	mov	dx, offset bad_buffers
+ 	jmp	config_error
+ 
++func_hifiles:		; HIFILES=nn
++	or	filesIn,FILES_IN_HMA+FILES_IN_UMB
++					; enable HMA and UMB usage for file handles
+ 
+ func_files:		; FILES=nn
+ 	call	atoi			; AX = # of files
+@@ -1028,7 +1048,9 @@
+ 	mov	dx, offset bad_files
+ 	jmp	config_error
+ 
+-
++func_hifcbs:		; HIFCBS=nn
++	or	filesIn,FILES_IN_HMA+FILES_IN_UMB
++					; enable HMA and UMB usage for file handles
+ 
+ func_fcbs:		; FCBS=nn
+ 	call	atoi			; AX = # of files
+@@ -1074,6 +1096,10 @@
+ func_switches10:
+ 	ret
+ 
++func_histacks:		; HISTACKS=number,size
++	or	stacksIn,STACKS_IN_HMA+STACKS_IN_UMB
++					; enable HMA and UMB usage for stacks
++
+ func_stacks:		; STACKS=number,size
+ ;-----------
+ 	call	atoi			; ax = number of stacks
+@@ -1456,7 +1482,8 @@
+ 	int	21h			; ax:0 -> exec memory
+ 	push	bx			; we have allocated BX para's
+ 	mov	es,ax			; ES -> exec memory
+-	mov	bx,init_dseg		; we want to protect BX:0 and above
++;	mov	bx,init_dseg		; we want to protect BX:0 and above
++	mov	bx,res_ddsc_seg		; we want to protect BX:0 and above
+ 	dec	bx			; allow for DMD
+ 	sub	bx,ax			; we can spare this many paras
+ 	mov	ah,MS_M_SETBLOCK	;  for the exec so grow the 
+@@ -1545,6 +1572,63 @@
+ f_hidos10:
+ 	ret
+ 
++func_dosdata:		; DOSDATA=UMB - relocate DOS data segment to upper memory
++	call	separator
++	mov	di,offset low_opt
++	call	compare
++	 jc	func_dosdata10
++	mov	hidosdata,0
++	jmps	func_dosdata
++func_dosdata10:
++	mov	di,offset umb_opt
++	call	compare
++	 jc	func_dosdata20
++	or	hidosdata,DOSDATA_IN_UMB
++	jmps	func_dosdata
++func_dosdata20:
++	ret
++
++func_ddscs:		; DDSCS=HIGH,UMB - relocate DDSCs to high or upper memory
++	call	separator
++	mov	di,offset low_opt
++	call	compare
++	 jc	func_ddscs10
++	mov	hiddscs,0
++	jmps	func_ddscs
++func_ddscs10:
++	call	separator
++	mov	di,offset high_opt
++	call	compare
++	 jc	func_ddscs20
++	or	hiddscs,DDSCS_IN_HMA
++	jmps	func_ddscs
++func_ddscs20:
++	call	separator
++	mov	di,offset umb_opt
++	call	compare
++	 jc	func_ddscs30
++	or	hiddscs,DDSCS_IN_UMB
++	jmps	func_ddscs
++func_ddscs30:
++	ret
++
++func_xbda:		; XBDA=LOW,UMB
++	call	separator
++	mov	di,offset low_opt
++	call	compare
++	 jc	func_xbda10
++	or	hixbda,MOVE_XBDA_LOW
++	jmps	func_xbda
++func_xbda10:
++	call	separator
++	mov	di,offset umb_opt
++	call	compare
++	 jc	func_xbda20
++	or	hixbda,MOVE_XBDA_HIGH
++	jmps	func_xbda
++func_xbda20:
++	ret
++
+ 
+ func_dos:		; DOS=HIGH - relocate BIOS/BDOS/Buffer etc to FFFF
+ 	call	separator		; Deblank Command
+@@ -1590,6 +1674,7 @@
+ 	mov	bios_target_seg,0FFFFh
+ 	mov	hidos,TRUE		; update hidos flag to be ON
+ 	or	buffersIn,BUFFERS_IN_HMA; buffers at seg FFFF too
++;	or	filesIn,FILES_IN_HMA	; and also files
+ 	ret
+ 
+ func_dos_low:
+@@ -1600,6 +1685,9 @@
+ 	mov	bios_target_seg,0
+ 	mov	hidos,FALSE		; system allocation from low memory
+ 	mov	buffersIn,0		; buffers from low memory
++	mov	filesIn,0		; also files
++	mov	stacksIn,0		; and stacks
++	mov	lastdrvIn,0		; and LDT
+ 	ret
+ 
+ func_dos_umb:
+@@ -1607,6 +1695,10 @@
+ ; allocate Upper Memory Blocks and link them to the DMD chain
+ ;
+ 	mov	hidos,TRUE		; update hidos flag to be ON
++	or	buffersIn,BUFFERS_IN_UMB; enable UMB usage for buffers
++	or	filesIn,FILES_IN_UMB	; and files
++	or	stacksIn,STACKS_IN_UMB	; and stacks
++	or	lastdrvIn,LASTDRV_IN_UMB; and LDT
+ 	call	initialise_dmd_upper	; build initial upper memory DMD
+ 	 jc	func_dos_umb30
+ func_dos_umb10:
+@@ -2250,7 +2342,53 @@
+ func_getkey10:
+ 	mov	error_level,ax
+ 	ret
+-	
++
++func_version:				; VERSION=x.xx,x.xx
++	call	comma			; check for leading ','
++	 jnc	func_version20		; if yes, then skip to true version
++	xor	dx,dx
++	call	atoi			; get major version number
++	 jc	func_version40		; no numerical value
++	cmp	ax,0
++	 jz	func_version40
++	mov	dl,al
++	call	dot			; check for '.'
++	 jc	func_version10
++	call	atoi			; get minor version number
++	 jc	func_version40
++	mov	dh,al
++func_version10:
++	push	es
++	push	bx
++	mov	es,dos_dseg
++	mov	bx,0d12h		; use as new DOS version
++	mov	es:[bx],dx
++	pop	bx
++	pop	es
++	call	separator		; check for ','
++	 jc	func_version40
++func_version20:
++	xor	dx,dx
++	call	atoi			; get major version number
++	 jc	func_version40		; no numerical value
++	cmp	ax,0
++	 jz	func_version40
++	mov	dl,al
++	call	dot			; check for '.'
++	 jc	func_version30
++	call	atoi			; get minor version number
++	 jc	func_version40
++	mov	dh,al
++func_version30:
++	push	es
++	push	bx
++	mov	es,dos_dseg
++	mov	bx,0d10h		; use as new DOS version
++	mov	es:[bx],dx
++	pop	bx
++	pop	es
++func_version40:
++	ret
+ 	
+ ;	CONFIG_ERROR is the global error handler for the CONFIG.SYS
+ ;	commands. It is called with SI pointing to the CR/LF terminated string
+@@ -2419,6 +2557,41 @@
+ 	clc					; not end of line
+ 	ret
+ 
++dot:
++;---------
++; On Entry:
++;	DS:SI -> string
++; On Exit:
++;	DS:SI -> next option
++;	CY set if '.' not found
++;
++; Strips off all whitespace, and the optional '.'
++	call	whitespace			; deblank string and
++	lodsb					;  check for '.' separator
++	cmp	al,'.'				;  discarding if found
++	 je	dot10
++	dec	si
++	stc					; else set carry
++dot10:
++	ret
++
++comma:
++;---------
++; On Entry:
++;	DS:SI -> string
++; On Exit:
++;	DS:SI -> next option
++;	CY set if ',' not found
++;
++; Strips off all whitespace, and the optional ','
++	call	whitespace			; deblank string and
++	lodsb					;  check for ',' separator
++	cmp	al,','				;  discarding if found
++	 je	comma10
++	dec	si
++	stc					; else set carry
++comma10:
++	ret
+ 
+ strupr:
+ ;------
+@@ -3232,7 +3405,7 @@
+ 	extrn	mem_size:word		; Real top of Memory
+ 
+ 	extrn	init_dseg:word		; Current Init Data Segment
+-
++	extrn	res_ddsc_seg:word
+ 
+ include	initmsgs.def				; Include TFT Header File
+ 
+@@ -3296,6 +3469,13 @@
+ 	extrn	history_size:word	;
+ 	extrn	num_stacks:word
+ 	extrn	stack_size:word
++	extrn	filesIn:byte
++	extrn	stacksIn:byte
++	extrn	lastdrvIn:byte
++	extrn	hidosdata:byte
++	extrn	hiddscs:byte
++	extrn	hixbda:byte
++	extrn	configpass:byte
+ 
+ if not ADDDRV
+ 	extrn	hidos:byte
+@@ -3306,7 +3486,7 @@
+ 
+ 	extrn	dbcs_tbl:dword
+ 	extrn	ctry_info:byte
+-
++	extrn	dos_dseg:word
+ 
+ 
+ 	Public	cfg_file, cfg_file_end
+@@ -3339,6 +3519,7 @@
+ cfg_seeklo	dw	0		; offset we have reached in CONFIG file
+ cfg_seekhi	dw	0		; in case Richards CONFIG file > 64k
+ 
++	Public	cfg_head
+ cfg_head	dw	0		; offset we are at in CONFIG_BUF
+ cfg_tail	dw	0		; # bytes currently in CONFIG_BUF
+ 
+@@ -3447,25 +3628,35 @@
+ CF_NOF		equ	0001h		; set if F5/F8 should be ignored
+ CF_LC		equ	0002h		; set if case should be preserved
+ CF_QUERY	equ	0004h		; set at run time eg. "DEVICE?"
++CF_LAST		equ	0020h		; execute in last config pass
+ 
+ cfg_table	rw	0
+ if not ADDDRV
+ 	dw	cmd_country,	func_country,	0	; COUNTRY=nnn,nnn,country
+ 	dw	cmd_shell,	func_shell,	0	; SHELL=filename
+ 	dw	cmd_lastdrive,	func_lastdrive,	0	; LASTDRIVE=d:
++	dw	cmd_hilastdrive,func_hilastdrive,0	; HILASTDRIVE=d:
+ 	dw	cmd_break,	func_break,	0	; BREAK=ON/OFF
+ 	dw	cmd_buffers,	func_buffers,	0	; BUFFERS=nn
+ 	dw	cmd_hibuffers,	func_hibuffers,	0	; HIBUFFERS=nn
+ 	dw	cmd_fcbs,	func_fcbs,	0	; FCBS=nn
++	dw	cmd_hifcbs,	func_hifcbs,	0	; HIFCBS=nn
+ 	dw	cmd_files,	func_files,	0	; FILES=nn
++	dw	cmd_hifiles,	func_hifiles,	0	; HIFILES=nn
+ 	dw	cmd_stacks,	func_stacks,	0	; STACKS=nn
++	dw	cmd_histacks,	func_histacks,	0	; HISTACKS=nn
+ 	dw	cmd_fastopen,	func_fastopen,	0	; FASTOPEN=nnn
+ 	dw	cmd_drivparm,	func_drivparm,	0	; DRIVPARM=/d:nn ...
+ 	dw	cmd_history,	func_history,	0	; HISTORY=ON|OFF,NNN
++	dw	cmd_hiinstalllast,func_hiinstall,CF_LAST; HIINSTALLLAST=cmdstring
+ 	dw	cmd_hiinstall,	func_hiinstall,	0	; HIINSTALL=cmdstring
+ 	dw	cmd_installhigh, func_hiinstall, 0	; INSTALLHIGH=cmdstring
++	dw	cmd_installlast,func_install,	CF_LAST	; INSTALLLAST=cmdstring
+ 	dw	cmd_install,	func_install,	0	; INSTALL=cmdstring
+ 	dw	cmd_hidos,	func_hidos,	0	; HIDOS=ON/OFF
++	dw	cmd_dosdata,	func_dosdata,	0	; DOSDATA=UMB
++	dw	cmd_ddscs,	func_ddscs,	0	; DDSCS=HIGH,UMB
++	dw	cmd_xbda,	func_xbda,	0	; XBDA=LOW,UMB
+ 	dw	cmd_dos,	func_dos,	0	; DOS=HIGH
+ 	dw	cmd_set,	func_set,	CF_LC	; SET envar=string
+ 	dw	cmd_switches,	func_switches,	CF_NOF	; SWITCHES=...
+@@ -3493,6 +3684,7 @@
+ 	dw	cmd_yeschar,	func_yeschar,	0	; YESCHAR=
+ 	dw	cmd_deblock,	func_deblock,	0	; DEBLOCK=xxxx
+ 	dw	cmd_numlock,	func_numlock,	0	; NUMLOCK=ON/OFF
++	dw	cmd_version,	func_version,	0	; VERSION=x.xx
+ 	dw	cmd_common,	func_common,	0	; [COMMON]
+  	dw	0				; end of table
+ 
+@@ -3500,19 +3692,28 @@
+ cmd_country	db	'COUNTRY',0
+ cmd_shell	db	'SHELL',0
+ cmd_lastdrive	db	'LASTDRIVE',0
++cmd_hilastdrive	db	'HILASTDRIVE',0
+ cmd_break	db	'BREAK',0
+ cmd_buffers	db	'BUFFERS',0
+ cmd_hibuffers	db	'HIBUFFERS',0
+ cmd_fcbs	db	'FCBS',0
++cmd_hifcbs	db	'HIFCBS',0
+ cmd_files	db	'FILES',0
++cmd_hifiles	db	'HIFILES',0
+ cmd_stacks	db	'STACKS',0
++cmd_histacks	db	'HISTACKS',0
+ cmd_fastopen	db	'FASTOPEN',0
+ cmd_drivparm	db	'DRIVPARM', 0
+ cmd_history	db	'HISTORY', 0
+ cmd_install	db	'INSTALL', 0
++cmd_installlast	db	'INSTALLLAST', 0
+ cmd_hiinstall	db	'HIINSTALL', 0
++cmd_hiinstalllast	db	'HIINSTALLLAST', 0
+ cmd_installhigh	db	'INSTALLHIGH', 0
+ cmd_hidos	db	'HIDOS',0
++cmd_dosdata	db	'DOSDATA',0
++cmd_ddscs	db	'DDSCS',0
++cmd_xbda	db	'XBDA',0
+ cmd_dos		db	'DOS',0
+ cmd_set		db	'SET',0
+ cmd_switches	db	'SWITCHES',0
+@@ -3540,6 +3741,7 @@
+ cmd_yeschar	db	'YESCHAR',0
+ cmd_deblock	db	'DEBLOCK',0
+ cmd_numlock	db	'NUMLOCK',0
++cmd_version	db	'VERSION',0
+ cmd_common	db	'[COMMON]',0
+ 
+ cmd_on		db	'ON',0
+diff -u -P -r dr70106/drbio/init.asm dr70107/drbio/init.asm
+--- dr70106/drbio/init.asm	2003-08-27 20:08:18.000000000 +0000
++++ dr70107/drbio/init.asm	2004-10-26 14:26:32.000000000 +0000
+@@ -196,7 +196,7 @@
+ 	dw	offset CGROUP:INITDATA	; compresses from INITDATA onwards
+ endif					; this word set to 0 when compressed
+ 
+-	orgabs	06h
++	org	06h
+     db  'COMPAQCompatible'  
+ 
+ 	dw	offset CGROUP:RCODE	; lets find offset of RCODE
+@@ -531,14 +531,14 @@
+ 
+ ;	List of BPBs that we usually support
+ 
+-bpb160		BPB	<512,1,1,2, 64, 40*1*8,0FEh,1, 8,1,0,0>
+-bpb180		BPB	<512,1,1,2, 64, 40*1*9,0FCh,2, 9,1,0,0>
+-bpb320		BPB	<512,2,1,2,112, 40*2*8,0FFh,1, 8,2,0,0>
+-bpb360		BPB	<512,2,1,2,112, 40*2*9,0FDh,2, 9,2,0,0>
+-bpb1200		BPB	<512,1,1,2,224,80*2*15,0F9h,7,15,2,0,0>
+-bpb720		BPB	<512,2,1,2,112, 80*2*9,0F9h,3, 9,2,0,0>
+-bpb1440		BPB	<512,1,1,2,224,80*2*18,0F0h,9,18,2,0,0>
+-bpb2880		BPB	<512,2,1,2,240,80*2*36,0F0h,9,36,2,0,0>
++bpb160		OLDBPB	<512,1,1,2, 64, 40*1*8,0FEh,1, 8,1,0,0>
++bpb180		OLDBPB	<512,1,1,2, 64, 40*1*9,0FCh,2, 9,1,0,0>
++bpb320		OLDBPB	<512,2,1,2,112, 40*2*8,0FFh,1, 8,2,0,0>
++bpb360		OLDBPB	<512,2,1,2,112, 40*2*9,0FDh,2, 9,2,0,0>
++bpb1200		OLDBPB	<512,1,1,2,224,80*2*15,0F9h,7,15,2,0,0>
++bpb720		OLDBPB	<512,2,1,2,112, 80*2*9,0F9h,3, 9,2,0,0>
++bpb1440		OLDBPB	<512,1,1,2,224,80*2*18,0F0h,9,18,2,0,0>
++bpb2880		OLDBPB	<512,2,1,2,240,80*2*36,0F0h,9,36,2,0,0>
+ NBPBS		equ	8
+ 
+ ;	The following is a template, that gets overwritten
+@@ -621,6 +621,8 @@
+ 	sti
+ 	cld
+ 
++	push	ds:1eh[bp]
++	push	ds:1ch[bp]
+ 	push	cx			; save entry registers
+ 	push	di			; (important in ROM systems)
+ 
+diff -u -P -r dr70106/drbio/make.bat dr70107/drbio/make.bat
+--- dr70106/drbio/make.bat	2002-07-04 21:24:00.000000000 +0000
++++ dr70107/drbio/make.bat	2005-01-15 18:24:06.000000000 +0000
+@@ -87,14 +87,14 @@
+ 
+ REM ***************************************************
+ REM Link the OBJ's and LIBR file to create the BIOS.EXE
+-REM and then use EXE2BIN to create the IBMBIO.COM file.
++REM and then use EXE2BIN to create the DRBIO.SYS file.
+ REM ***************************************************
+ %LINK% @bios.lnk
+ IF ERRORLEVEL 1 GOTO FAILED
+-%LOCTOOLS%\exe2bin.exe .\bin\bios.exe .\bin\ibmbio.com
++%LOCTOOLS%\exe2bin.exe .\bin\bios.exe .\bin\drbio.sys
+ IF ERRORLEVEL 1 GOTO FAILED
+ del .\bin\bios.exe
+-%LOCTOOLS%\compbios .\bin\ibmbio.com
++%LOCTOOLS%\compbios .\bin\drbio.sys
+ IF ERRORLEVEL 1 GOTO FAILED
+ goto exit
+ 
+diff -u -P -r dr70106/drbio/request.equ dr70107/drbio/request.equ
+--- dr70106/drbio/request.equ	2003-01-25 14:09:20.000000000 +0000
++++ dr70107/drbio/request.equ	2004-03-20 01:56:42.000000000 +0000
+@@ -175,6 +175,10 @@
+ RQ19_VERIFY	equ	62h		; verify tracks
+ RQ19_SETMEDIA	equ	46h		; set media ID
+ RQ19_GETMEDIA	equ	66h		; get media ID
++RQ19_LOCKLOG	equ	4ah
++RQ19_LOCKPHYS	equ	4bh
++RQ19_UNLOCKLOG	equ	6ah
++RQ19_UNLOCKPHYS	equ	6bh
+ 
+ RQ19_PRP_START	equ	4Ch		; start of codepage prepare
+ RQ19_PRP_END	equ	4Dh		; end of codepage prepare
+diff -u -P -r dr70106/drbio/stacks.asm dr70107/drbio/stacks.asm
+--- dr70106/drbio/stacks.asm	1997-04-16 10:20:50.000000000 +0000
++++ dr70107/drbio/stacks.asm	2004-04-16 16:53:58.000000000 +0000
+@@ -35,7 +35,10 @@
+ ;    Add header to system allocations
+ ;    ENDLOG
+ 
+-CGROUP	group	INITCODE, STACKS
++STACKS_IN_HMA	equ	00000001b
++STACKS_IN_UMB	equ	00000010b
++
++CGROUP	group	INITCODE, STACKS, INITDATA
+ 
+ STACKS		segment	public para 'STACKS'
+ 
+@@ -172,20 +175,27 @@
+ 	cli				; just in case
+ 	push	bp
+ 	push	si			; save work registers
+-	mov	si,cs:NextStack		; start looking here for a stack
++	push	di
++	call	SwapStack05		; get offset of our code in segment
++SwapStack05:
++	pop	di
++	sub	di,(SwapStack05-StackCode)	; to locate the stack variables
++;	mov	si,cs:[NextStack-StackCode]	; start looking here for a stack
++	mov	si,cs:(NextStack-StackCode)[di]	; start looking here for a stack
+ SwapStack10:
+ 	cmp	cs:STACK_CB_FLAGS[si],STACK_FREE
+ 	 jne	SwapStack20		; use this stack if possible
+ 	mov	bp,cs:STACK_CB_TOP[si]	; get the top of this stack
+ 	cmp	si,cs:word ptr [bp]	; does the check match ?
+ 	 jne	SwapStack20		; no, try the next one
+-	mov	cs:NextStack,si		; remember where we are
++;	mov	cs:[NextStack-StackCode],si	; remember where we are
++	mov	cs:(NextStack-StackCode)[di],si	; remember where we are
+ 	mov	cs:STACK_CB_FLAGS[si],STACK_INUSE
+ 	mov	cs:STACK_CB_SS[si],ss	; save old stack
+ 	mov	cs:STACK_CB_SP[si],sp
+ 
+ 	mov	bp,sp
+-	xchg	bx,ss:word ptr 4[bp]	; BX = return address, BX saved
++	xchg	bx,ss:word ptr 6[bp]	; BX = return address, BX saved
+ 
+ 	mov	bp,cs
+ 	mov	ss,bp
+@@ -195,7 +205,9 @@
+ 	mov	ss,cs:STACK_CB_SS[si]
+ 	mov	sp,cs:STACK_CB_SP[si]	; swap back to the original stack
+ 	mov	cs:STACK_CB_FLAGS[si],STACK_FREE
+-	mov	cs:NextStack,si		; update in case we were nested
++;	mov	cs:[NextStack-StackCode],si	; update in case we were nested
++	mov	cs:(NextStack-StackCode)[di],si	; update in case we were nested
++	pop	di
+ 	pop	si			; restore registers
+ 	pop	bp
+ 	pop	bx			; (was return address, now saved BX)
+@@ -203,8 +215,10 @@
+ 
+ SwapStack20:
+ 	sub	si,STACK_CB_SIZE	; it's not, so try the next
+-	cmp	si,cs:FirstStack	;  if there is one
++;	cmp	si,cs:[FirstStack-StackCode]	;  if there is one
++	cmp	si,cs:(FirstStack-StackCode)[di]	;  if there is one
+ 	 jae	SwapStack10
++	pop	di
+ 	pop	si			; restore registers
+ 	pop	bp
+ 	ret				; back to JMPF as we can't swap stacks
+@@ -262,6 +276,10 @@
+ 	Assume	CS:CGROUP, DS:CGROUP, ES:Nothing, SS:Nothing
+ 
+ 	extrn	alloc_hiseg:near
++	extrn	alloc_upper:near
++	extrn	alloc_seg:near
++	extrn	SetupHMA:near
++	extrn	AllocHMA:near
+ 
+ 	Public	InitStacks
+ ;==========
+@@ -290,19 +308,42 @@
+ 	mul	StackSize		; AX bytes are required for stacks
+ 	add	ax,StackOff		; add to start of stacks
+ 	push	ax			; save length in bytes
++
++	test	stacksIn,STACKS_IN_HMA	; HMA usage enables for stacks?
++	 jz	InitStacks04
++	call	SetupHMA		; make sure HMA chain is established
++	pop cx				; CX = bytes wanted
++	push cx
++	mov	dx,0FFFFh		; anywhere is OK
++	call	AllocHMA		; ES:DI -> allocated data
++	pop	ax
++	push	ax
++	 jc	InitStacks04		; if high mem allocation failed, try upper
++	mov	ax,es			; AX = segment
++	jmp	InitStacks07
++InitStacks04:
+ 	add	ax,15			; allow for rounding
+ 	mov	cl,4
+ 	shr	ax,cl			; convert it to para's
+ 	mov	dl,'S'			; allocation signature is Stacks
+-	call	alloc_hiseg		; allocate some memory
++	test	stacksIn,STACKS_IN_UMB	; UMB usage enables for stacks?
++	 jz	InitStacks05
++	call	alloc_upper		; yes, try to allocate upper memory
++	 jnc	InitStacks06		; if this fails
++InitStacks05:
++	call	alloc_seg		; try to allocate low mem
++InitStacks06:
++	xor	di,di
++InitStacks07:
+ 	pop	cx			; CX = length in bytes
++	push	di
+ 	mov	StackSeg,ax		; remember where
++	mov	StackOff,di
+ 	mov	es,ax
+ 			Assume ES:STACKS
+-	xor	di,di
+ 	mov	al,0CCh			; fill stacks with CC for debug
+ 	rep	stosb
+-	xor	di,di
++	pop	di
+ 	mov	si,offset CGROUP:StackCode
+ 	mov	cx,RELOCATE_SIZE
+ 	rep	movsb			; relocate the code
+@@ -362,4 +403,10 @@
+ 
+ INITCODE	ends
+ 
++INITDATA	segment	'INITDATA'
++
++	extrn	stacksIn:byte
++
++INITDATA	ends
++
+ 	end
+diff -u -P -r dr70106/drbio/udsc.equ dr70107/drbio/udsc.equ
+--- dr70106/drbio/udsc.equ	2003-03-29 00:12:58.000000000 +0000
++++ dr70107/drbio/udsc.equ	2004-02-06 15:06:26.000000000 +0000
+@@ -32,8 +32,8 @@
+ ;    ENDLOG
+ 
+ 
+-;UDSC_BPB_LENGTH	equ	25
+-UDSC_BPB_LENGTH	equ	41
++OLD_UDSC_BPB_LENGTH	equ	25
++UDSC_BPB_LENGTH		equ	41
+ 
+ UDSC		struc
+ UDSC_NEXT	dd	?		; link to next UDSC_
+diff -u -P -r dr70106/drdos/bdevio.a86 dr70107/drdos/bdevio.a86
+--- dr70106/drdos/bdevio.a86	2003-09-24 01:46:48.000000000 +0000
++++ dr70107/drdos/bdevio.a86	2004-08-13 17:32:32.000000000 +0000
+@@ -158,14 +158,16 @@
+ LOCAL_DDSC_LEN	equ	offset $ - offset local_ddsc
+ 
+ local_ddsc2	rb	0
++;		dw	0,0		; total free clusters on drive
++;		dw	0		; FAT flags
++;		dw	0		; FS info
++;		dw	0		; backup boot sec
+ bdatadd		dw	0,0
+ blastcl		dw	0,0		; # last cluster (32-bit)
+ 		dw	0,0		; # sectors per FAT (32-bit)
+-		dw	0,0		; next block to allocate
+-		dw	0,0		; total free clusters on drive
+-		dw	0		; FAT flags
+-		dw	0		; version of file system
+ fsroot		dw	0,0		; first cluster of root dir
++;		dw	0,0		; next block to allocate
++;		dw	0		; version of file system
+ 
+ LOCAL_DDSC2_LEN	equ	offset $ - offset local_ddsc2
+ 
+@@ -205,7 +207,7 @@
+ 
+ blk		dw	0,0		; current cluster of filepos
+ blkidx		dw	0,0		; current cluster index within file
+-blkoffset	dw	0		; offset within cluster
++blkoffset	dw	0,0		; offset within cluster
+ 
+ fdrw_seek_cl	dw	0,0
+ fdw_trunc_cl	dw	0,0
+@@ -397,10 +399,15 @@
+ ;
+ 
+ 	les	bx,current_dhndl
+-	mov	cx,blkoffset		; get offset within current block
++;	mov	cx,blkoffset		; get offset within current block
+ 	mov	ax,blkidx		; get logical block number
+ 	mov	dx,blkidx+2
+-	 jcxz	fdw_t10			; skip if no data in last block
++	cmp	blkoffset,0		; get offset within current block
++;	 jcxz	fdw_t10			; skip if no data in last block
++	 jnz	fdw_t05			; skip if no data in last block
++	cmp	blkoffset+2,0
++	 jz	fdw_t10
++fdw_t05:
+ ;	inc	ax			; else add in another cluster
+ 	add	ax,1			; else add in another cluster
+ 	adc	dx,0
+@@ -528,9 +535,11 @@
+ 	call	mul32			; compute maximum size of disk
+ 	pop	ax
+ 	pop	dx
+-	add	sp,12			; clean up the stack again
++	pop	cx
++	add	sp,10			; clean up the stack again
+ 	sub	ax,byteoff
+ 	sbb	dx,byteoff+WORD		; beyond this we can't go
++	sbb	cx,0
+ 	 jc	fdrw_p30
+ ;	mov	ax,byteoff		; DX:AX = current file size
+ ;	mov	dx,byteoff+WORD
+@@ -544,7 +553,8 @@
+ 	sub	sp,8			; reserve space on stack
+ 	call	div32
+ 	pop	word ptr blkoffset	; offset within cluster
+-	add	sp,2			; skip high word
++	pop	word ptr blkoffset+2
++;	add	sp,2			; skip high word
+ 	pop	word ptr blkidx		; save it for later
+ 	pop	word ptr blkidx+2
+ 	add	sp,8			; clean up stack
+@@ -770,7 +780,8 @@
+ 	sub	sp,8			; reserve space on stack for result
+ 	call	div32
+ 	pop	word ptr blkoffset	; save cluster and offset within it
+-	add	sp,2
++	pop	word ptr blkoffset+2
++;	add	sp,2
+ 	pop	word ptr blkidx
+ 	pop	word ptr blkidx+2
+ 	add	sp,8			; clean up stack
+@@ -847,6 +858,7 @@
+ 	mov	blk,ax			; save the block for coniguous checks
+ 	mov	blk+2,dx
+ 	mov	bx,blkoffset
++	mov	cx,blkoffset+2
+ 	call	clus2sec		; convert to sector/offset
+ 	mov	word ptr fdrwsec,ax	; remember this block
+ 	mov	word ptr fdrwsec+WORD,dx
+@@ -920,11 +932,15 @@
+ 	sub	dx,dx			; assume no extra blocks required
+ 	mov	ax,fdrwreq		; total byte count
+ 	mov	cx,clsize		; get number of bytes
+-	sub	cx,blkoffset		; CX = bytes remaining in this block
++	mov	bx,clsize+2
++	sub	cx,blkoffset		; BX:CX = bytes remaining in this block
++	sbb	bx,blkoffset+2
+ 	sub	ax,cx			; if wholly containined within block
+-	 jbe	direct_rw10		; then leave it alone
++	sbb	dx,bx
++;	 jbe	direct_rw10		; then leave it alone
++	 jnc	direct_rw10		; then leave it alone
+ ;	div	clsize			; else get # of extra clusters
+-	push	cx
++;	push	cx
+ 	push	dx
+ 	push	ax
+ 	push	word ptr clsize+2
+@@ -935,7 +951,7 @@
+ 	add	sp,2
+ 	pop	ax
+ 	add	sp,10
+-	pop	cx
++;	pop	cx
+ 	xchg	ax,dx			; DX = clusters, AX = remainder
+ 	or	ax,ax			; round up if any remainder
+ 	 jz	direct_rw10		; skip if even number
+@@ -955,7 +971,7 @@
+ 	pop	dx
+ 	add	sp,12
+ 	sub	ax,blkoffset		; BX = skipped bytes in 1st cluster
+-	sbb	dx,0
++	sbb	dx,blkoffset+2
+ 					; AX:DX = max # of bytes transferrable
+ 					;    from current position
+ 	test	dx,dx
+@@ -1062,20 +1078,20 @@
+ ;	mov	ah,byte ptr fdrwsec+WORD
+ 	mov	ax,word ptr fdrwsec+2
+ ;	mov	al,adrive		; get our drive number
++	mov	cl,adrive		; get our drive number
+ 	lds	bx,bcb_root		; DS:BX -> 1st buffer
+ SynchroniseBuffers10:
+ 	test	ds:BCB_FLAGS[bx],BF_ISDAT; is this a data buffer?
+ 	 jz	SynchroniseBuffers30	; skip if directory or FAT
+ ;	cmp	al,ds:BCB_DRV[bx]	; does the drive match?
+-	mov	cl,adrive		; get our drive number
+ 	cmp	cl,ds:BCB_DRV[bx]	; does the drive match?
+ 	 jne	SynchroniseBuffers30	; skip if different
+ 	mov	si,ds:BCB_REC[bx]	; compute bcb->rec - prec
+-	sub	si,dx			; result in SI,CL (lsb..msb)
++	sub	si,dx			; result in SI,DI (lsb..msb)
+ ;	mov	cl,ds:byte ptr BCB_REC2[bx]
+ ;	sbb	cl,ah			; get bits 16-23 of result
+-	mov	cx,ds:BCB_REC2[bx]
+-	sbb	cx,ax			; get bits 16-31 of result
++	mov	di,ds:BCB_REC2[bx]
++	sbb	di,ax			; get bits 16-31 of result
+ 	 jne	SynchroniseBuffers30	; skip if bcb->rec < prec
+ 	cmp	si,ss:fdrwdircnt	; else check against transfer length
+ 	 jae	SynchroniseBuffers30	; skip if beyond transfer length
+@@ -1089,6 +1105,7 @@
+ 	push	ax ! push dx		; save record address
+ 
+ 	mov	ax,ss:psecsiz		; # of bytes in sector buffer
++	push	cx			; save drive number
+ 	mov	cx,ax
+ 	shr	cx,1			; CX = words per sector
+ 	mul	si			; AX = byte offset from start buffer
+@@ -1097,6 +1114,7 @@
+ 	mov	es,ss:fdrwseg		; ES:DI -> data to be replaced
+ 	lea	si,BCB_DATA[bx]
+ 	rep	movsw			; move CX words (one physical sector)
++	pop	cx			; restore drive number
+ 	pop	dx ! pop ax		; restore record address
+ 	jmps	SynchroniseBuffers30
+ 
+@@ -1239,11 +1257,25 @@
+ 	ret
+ 
+ device_driver10:
++;	push	ds
++;	push	ds:DH_INTERRUPT[si]	; interrupt routine address on stack
++;	push	ds
++;	push	ds:DH_STRATEGY[si]	; strategy routine address on stack
++;	retf				; retf to strategy, interrupt, us
+ 	push	ds
+-	push	ds:DH_INTERRUPT[si]	; interrupt routine address on stack
++	push	si
++	push	cs
++	mov	ax,offset device_driver11
++	push	ax
+ 	push	ds
+ 	push	ds:DH_STRATEGY[si]	; strategy routine address on stack
+-	retf				; retf to strategy, interrupt, us
++	retf				; retf to strategy and device_driver11
++device_driver11:
++	pop	si
++	pop	ds
++	push	ds
++	push	ds:DH_INTERRUPT[si]	; interrupt routine address on stack
++	retf				; retf to interrupt, us
+ 
+ eject
+ ;	Select drive and check for door open ints
+@@ -1729,7 +1761,7 @@
+ ;--------
+ ; On Entry:
+ ;	DX:AX = cluster
+-;	BX = byte offset in cluster
++;	CX:BX = byte offset in cluster
+ ; On Exit:
+ ;	DX:AX = sector
+ ;	BX = byte offset in sector
+@@ -1739,7 +1771,8 @@
+ 	sbb	dx,0
+ 	push	dx			; save cluster on stack
+ 	push	ax
+-	xor	dx,dx
++;	xor	dx,dx
++	xchg	dx,cx
+ 	xchg	ax,bx			; DX:AX = byte offset
+ 	div	psecsiz			; AX = sector offset, DX = byte offset
+ 	mov	bx,dx			; BX = byte offset in sector
+@@ -1915,33 +1948,4 @@
+ 	ret
+ output_hex40	db	20h,0		; end of string
+ 
+-	public	output_fcb
+-output_fcb:
+-;----------------
+-; On Entry:
+-;	si = offset CGROUP:message_msg
+-; On Exit:
+-;	None
+-	push	si
+-	push	ds
+-	push	ax
+-	push	bx
+-	push	cx
+-	mov	cx,11
+-	lodsb				; get 1st character (never NULL)
+-output_fcb10:
+-	mov	ah,0Eh
+-	mov	bx,7
+-	push	cx
+-	int	10h			; TTY write of character
+-	pop	cx
+-	lodsb				; fetch another character
+-	loop	output_fcb10
+-	pop	cx
+-	pop	bx
+-	pop	ax
+-	pop	ds
+-	pop	si
+-	ret
+-
+ 	end
+diff -u -P -r dr70106/drdos/buffers.a86 dr70107/drdos/buffers.a86
+--- dr70106/drdos/buffers.a86	2003-12-22 02:35:44.000000000 +0000
++++ dr70107/drdos/buffers.a86	2004-09-12 02:00:52.000000000 +0000
+@@ -1479,6 +1479,7 @@
+ zeroblk:				; DX:AX = blk
+ ;-------
+ 	xor	bx,bx			; Start at begining of cluster
++	xor	cx,cx
+ 	call	clus2sec		; translate to sector address
+ 	xchg	ax,dx			; AX:DX = 32 bit sector address
+ ;	mov	ah,al			; AH:DX = 24 bit sector address
+@@ -1645,14 +1646,14 @@
+ read_fsinfo05:
+ 	push	es
+ 	push	ds
+-	push	es
+-	pop	ds
+-	mov	dx,ds:DDSC_FSINFO[bx]	; sector number of FS info block
++	mov	dx,es:DDSC_FSINFO[bx]	; sector number of FS info block
+ 	xor	ax,ax
+ 	mov	cx,0FF00h+BF_ISDAT	; data buffer with preread
++	push	es
+ 	push	bx
+ 	call	locate_buffer		; read FS info block
+ 	pop	bx
++	pop	ds
+ 	mov	ax,es:word ptr BCB_DATA+FS_BFREE[si]	; free cluster count in FS info block
+ 	mov	dx,es:word ptr BCB_DATA+FS_BFREE+2[si]
+ 	mov	ds:word ptr DDSC_BFREE[bx],ax	; use this as new free cluster count
+@@ -1669,14 +1670,14 @@
+ 	 jne	write_fsinfo10		; no, then there is no fs info block
+ 	push	es
+ 	push	ds
+-	push	es
+-	pop	ds
+-	mov	dx,ds:DDSC_FSINFO[bx]	; sector number of FS info block
++	mov	dx,es:DDSC_FSINFO[bx]	; sector number of FS info block
+ 	xor	ax,ax
+ 	mov	cx,0FF00h+BF_ISDAT	; data buffer with preread
++	push	es
+ 	push	bx
+ 	call	locate_buffer		; read FS info block
+ 	pop	bx
++	pop	ds
+ 	mov	ax,ds:word ptr DDSC_BFREE[bx]	; update buffer
+ 	mov	dx,ds:word ptr DDSC_BFREE+2[bx]
+ 	mov	es:word ptr BCB_DATA+FS_BFREE[si],ax
+@@ -1686,8 +1687,8 @@
+ 	mov	es:word ptr BCB_DATA+FS_BBLOCK[si],ax
+ 	mov	es:word ptr BCB_DATA+FS_BBLOCK+2[si],dx
+ 	or	es:BCB_FLAGS[si],BF_DIRTY	; mark buffer as modified
+-	call	flush_buffer		; and write it back to disk
+ 	pop	ds
++	call	flush_buffer		; and write it back to disk
+ 	pop	es
+ write_fsinfo10:
+ 	ret
+diff -u -P -r dr70106/drdos/cmdline.equ dr70107/drdos/cmdline.equ
+--- dr70106/drdos/cmdline.equ	2003-05-07 18:07:24.000000000 +0000
++++ dr70107/drdos/cmdline.equ	2004-10-24 14:40:30.000000000 +0000
+@@ -69,4 +69,4 @@
+ CHAR_SIZE	equ	CHAR_STD or CHAR_KANJI or CHAR_TAB or CHAR_CTL
+ CHAR_ONECOL	equ	CHAR_SPACE or CHAR_OTHER or CHAR_ALPHAN
+ 
+-CMDLINE_LEN	equ	128-14-5
++CMDLINE_LEN	equ	128
+diff -u -P -r dr70106/drdos/dirs.a86 dr70107/drdos/dirs.a86
+--- dr70106/drdos/dirs.a86	2003-10-01 18:36:54.000000000 +0000
++++ dr70107/drdos/dirs.a86	2004-08-15 12:27:48.000000000 +0000
+@@ -147,16 +147,25 @@
+ 	mov	dirbcb_dcnt,bx		;  and dir entry we want
+ 	test	ax,ax			; are we in the root ?
+ ;	 jz	fill_dirbuf10
+-	 jnz	fill_dirbuf09
++	 jnz	fill_dirbuf05
+ 	test	dx,dx
+-	 jnz	fill_dirbuf09
++	 jnz	fill_dirbuf05
+ 	cmp	dirinroot,0		; is this a FAT32 file system?
+ 	 jne	fill_dirbuf10		; no, proceed with FAT16/12 routine
+ 	mov	ax,word ptr fsroot	; low word of root dir cluster
+ 	mov	dx,word ptr fsroot+2
+-fill_dirbuf09:
+-	mov	cl,FCBSHF
+-	shl	bx,cl			; BX = byte offset in cluster
++fill_dirbuf05:
++;	mov	cl,FCBSHF
++;	shl	bx,cl			; BX = byte offset in cluster
++	mov	cx,FCBSHF
++	push	ax
++	xor	ax,ax
++fill_dirbuf07:
++	shl	bx,1			; BX = byte offset in cluster
++	rcl	ax,1
++	loop	fill_dirbuf07
++	mov	cx,ax
++	pop	ax
+ 	call	clus2sec		; DX:AX -> sector
+ 	jmps	fill_dirbuf20		; BX = offset in sector
+ fill_dirbuf10:
+diff -u -P -r dr70106/drdos/disk.a86 dr70107/drdos/disk.a86
+--- dr70106/drdos/disk.a86	2003-09-25 01:19:00.000000000 +0000
++++ dr70107/drdos/disk.a86	2004-03-20 18:34:34.000000000 +0000
+@@ -417,7 +417,11 @@
+ 	call	set_retry_RF		; Valid to RETRY or FAIL
+ 	mov	dh,80h			; set top bit - free space not needed
+ 	call	fdos_DISKINFO		; and make the function call
+-	 jnc	f1B1C1F32_common	; exit using common code
++;	 jnc	f1B1C1F32_common	; exit using common code
++	 jc	fdos_DI_error		; check if error
++	cmp	dosfat,FAT32		; attempt to use on FAT32 drive?
++	 jne	f1B1C1F32_common	; exit using common code
++	mov	ax,0ffh
+ fdos_DI_error:
+ 	jmp	fcberror_exit		; exit thru FCB error
+ 
+@@ -474,7 +478,7 @@
+ f36_OK30:
+ 	cmp	dx,0			; more than fits into 16-bit register?
+ 	 je	f36_OK50			; no, the value is exact
+-	cmp	al,128			; cluster size already 64K?
++	cmp	al,64			; cluster size already 64K?
+ 	 jae	f36_OK40
+ 	shl	al,1			; cluster size * 2
+ 	shr	dx,1			; free clusters / 2
+@@ -495,6 +499,7 @@
+ f36_exit:
+ 	jmp	return_AX_CLC
+ 
++	public	fdos_DISKINFO
+ fdos_DISKINFO:
+ ;-------------
+ ; Called by func1B, func1C, func1F, func32, func36
+@@ -503,8 +508,13 @@
+ ; 
+ 	mov	ax,FD_DISKINFO		; get information about drive
+ 	xchg	ax,FD_FUNC		; while getting orginal function #
+-	test	al,1			; is it func1B/func1F ?
+-	 jz	fdos_DI10		; if so these use the default
++;	test	al,1			; is it func1B/func1F ?
++	cmp	al,1bh			; is it func1B/func1F ?
++;	 jz	fdos_DI10		; if so these use the default
++	 je	fdos_DI05		; if so these use the default
++	cmp	al,1fh
++	 jne	fdos_DI10
++fdos_DI05:
+ 	xor	dl,dl			;  drive so zero DL
+ fdos_DI10:
+ 	mov	FD_DRIVE,dx		; drive in DX
+diff -u -P -r dr70106/drdos/dos7.asm dr70107/drdos/dos7.asm
+--- dr70106/drdos/dos7.asm	1970-01-01 00:00:00.000000000 +0000
++++ dr70107/drdos/dos7.asm	2004-07-19 21:17:18.000000000 +0000
+@@ -0,0 +1,294 @@
++; DOS7.ASM - Functions for DOS 7 compatibility
++;
++; This file is part of
++; The DR-DOS/OpenDOS Enhancement Project - http://www.drdosprojects.de
++; Copyright (c) 2002-2004 Udo Kuhnt
++
++	include	pcmode.equ
++	include	fdos.equ
++	include	fdos.def
++	include	dos7.equ
++
++PCM_CODE	cseg	byte
++
++	extrn	get_path_drive:near
++	extrn	fdos_diskinfo:near
++	extrn	fdos_nocrit:near
++	extrn	mul32:near
++	extrn	return_AX_CLC:near
++	extrn	error_exit:near
++	extrn	get_dseg:near
++
++	public	func73
++func73:
++	cmp	al,2			; function 7302h?
++	 je	func7302		; yes
++	cmp	al,3			; function 7303h?
++	 jne	f73_10
++	jmp	func7303		; yes
++f73_10:
++	cmp	al,5			; function 7305h?
++	 jne	func73_error
++	jmp	func7305		; yes
++func73_error:
++	mov	ax,7300h		; function not supported
++	clc
++	ret
++
++;	*************************************
++;	***    DOS Function 7302h         ***
++;	***    Get Extended DPB           ***
++;	*************************************
++;
++;Entry:	DL	= drive number
++;	ES:DI	= pointer to buffer for Extended DPB structure
++;	CX	= length of buffer
++;Exit:	ES:DI	preserved
++;	CF clear
++;Error:	CF set
++;	AX	= error code
++
++func7302:
++	cmp	cx,EDPB_LEN+2		; enough buffer space for data?
++	 jae	f7302_10
++	mov	ax,18h			; return 18h (bad request structure length)
++	stc
++	jmp	error_exit		; no, then exit with error
++f7302_10:
++	xor	dh,dh
++	call	fdos_DISKINFO		; get drive info, ES:BX -> DDSC
++	 jnc	f7302_20
++	mov	ax,0fh			; return 0fh (invalid drive)
++	stc
++	jmp	error_exit		; error if invalid drive
++f7302_20:
++	push	ds
++	lds	bp,int21regs_ptr	; DS:DI -> Extended DPB structure
++	mov	di,ds:reg_DI[bp]
++	mov	si,ds:reg_SI[bp]	; SI = signature
++	mov	ds,ds:reg_ES[bp]
++	mov	word ptr [di],EDPB_LEN	; length of data
++	inc	di			; skip to begin of EDPB
++	inc	di
++	push	ds
++	push	es
++	pop	ds
++	pop	es			; ES:DI -> EDPB, DS:BX -> DDSC
++	push	si
++	push	di
++	mov	si,bx			; copy standard DPB from DDSC
++	mov	cx,DDSC_BFREE
++	rep	movsb
++	pop	di
++	pop	si
++	xor	dh,dh
++	mov	es:EDPB_DPBFLAGS[di],dh	; clear DBP flags
++	cmp	si,0f1a6h		; check signature
++	 je	f7302_25
++	xor	ax,ax			; wrong signature, clear driver header and link address fields
++	dec	ax
++	mov	es:word ptr EDPB_DEVHEAD[di],ax
++	mov	es:word ptr EDPB_DEVHEAD+2[di],ax
++	mov	es:word ptr EDPB_LINK[di],ax
++	mov	es:word ptr EDPB_LINK+2[di],ax
++f7302_25:
++	lea	si,ds:DDSC_BFREE[bx]
++	mov	cx,DDSC_FSVER-DDSC_BFREE
++	cmp	ds:DDSC_DIRENT[bx],0	; is this a FAT32 drive?
++	 jnz	f7302_30		; no, then build the remaining portion from scratch
++	add	di,DDSC_FREE
++	rep	movsb			; else copy remaining EDPB portion from DDSC
++	jmps	f7302_40
++f7302_30:
++	push	di
++	add	di,DDSC_FREE
++	xor	al,al			; zero contents of remaining EDPB part
++	rep	stosb
++	pop	di
++	xor	ax,ax			; AX=FFFFh
++	dec	ax
++	mov	es:EDPB_FSINFO[di],ax	; then fill in the 16-bit values
++	mov	es:EDPB_BOOTBAK[di],ax
++	mov	ax,word ptr DDSC_DATADDR[bx]
++	mov	es:word ptr EDPB_BDATADDR[di],ax
++	mov	ax,word ptr DDSC_NCLSTRS[bx]
++	mov	es:word ptr EDPB_BCLSTRS[di],ax
++	mov	ax,word ptr DDSC_NFATRECS[bx]
++	mov	es:word ptr EDPB_BFATRECS[di],ax
++	mov	ax,word ptr DDSC_BLOCK[bx]
++	mov	es:word ptr EDPB_BBLOCK[di],ax
++f7302_40:
++	pop	ds
++	xor	ax,ax
++	call	return_AX_CLC
++	clc
++f7302_exit:
++	ret
++
++;	*************************************
++;	***    DOS Function 7303h         ***
++;	***    Extended Free Disk Space   ***
++;	*************************************
++;
++;Entry:	DS:DX	= pointer to ASCIZ string for path
++;	ES:DI	= pointer to buffer for extended free space structure
++;	CX	= length of buffer
++;Exit:	ES:DI	preserved
++;	CF clear
++;Error:	CF set
++;	AX	= error code
++
++func7303:
++	les	bp,int21regs_ptr	; ES:DI = pointer to drive path
++	mov	di,es:reg_DX[bp]
++	mov	es,es:reg_DS[bp]
++	call	get_path_drive
++	 jnc	f7303_10
++	mov	ax,0fh			; return 0fh (invalid drive)
++	stc
++	jmp	error_exit		; error if invalid drive
++f7303_10:
++	mov	dl,al			; drive number
++	inc	dl
++	xor	dh,dh
++	call	fdos_DISKINFO		; get drive info, ES:BX -> DDSC
++	 jnc	f7303_20
++	mov	ax,0fh			; return 0fh (invalid drive)
++	stc
++	jmp	error_exit		; error if invalid drive
++f7303_20:
++	cmp	cx,FREED_LEN		; enough buffer space for data?
++	 jbe	f7303_30
++	mov	ax,18h			; return 18h (bad request structure length)
++	stc
++	jmp	error_exit		; no, then exit with error
++f7303_30:
++	push	ds
++	lds	bp,int21regs_ptr	; DS:DI -> free space structure
++	mov	di,ds:reg_DI[bp]
++	mov	ds,ds:reg_ES[bp]
++	xor	dx,dx
++	mov	ax,FREED_LEN		; length of data
++	mov	FREED_SIZE[di],ax
++	xor	ax,ax			; structure version
++	mov	FREED_VER[di],ax
++	xor	ah,ah			; sector per cluster
++	mov	al,es:DDSC_CLMSK[bx]	; this is minus one
++	inc	ax			; so add one again
++	mov	word ptr FREED_SECPCLUS[di],ax
++	mov	word ptr FREED_SECPCLUS+2[di],dx
++	mov	ax,es:DDSC_SECSIZE[bx]	; bytes per sector
++	mov	word ptr FREED_BYTEPSEC[di],ax
++	mov	word ptr FREED_BYTEPSEC+2[di],dx
++	cmp	es:DDSC_DIRENT[bx],0	; is this a FAT32 drive?
++	 je	f7303_40		; yes
++	mov	ax,es:DDSC_FREE[bx]	; free clusters on drive (16-bit)
++	mov	word ptr FREED_FREECL[di],ax
++	mov	word ptr FREED_FREEPCL[di],ax
++	mov	word ptr FREED_FREECL+2[di],dx
++	mov	word ptr FREED_FREEPCL+2[di],dx
++	mov	ax,es:DDSC_NCLSTRS[bx]	; highest cluster on drive (16-bit)
++	dec	ax			; total clusters (16-bit)
++	mov	word ptr FREED_NCLUSTER[di],ax
++	mov	word ptr FREED_NPCLUS[di],ax
++	mov	word ptr FREED_NCLUSTER+2[di],dx
++	mov	word ptr FREED_NPCLUS+2[di],dx
++	jmps	f7303_50
++f7303_40:
++	mov	ax,es:word ptr DDSC_BFREE[bx]	; free clusters on drive (32-bit)
++	mov	word ptr FREED_FREECL[di],ax
++	mov	word ptr FREED_FREEPCL[di],ax
++	mov	ax,es:word ptr DDSC_BFREE+2[bx]
++	mov	word ptr FREED_FREECL+2[di],ax
++	mov	word ptr FREED_FREEPCL+2[di],ax
++	mov	ax,es:word ptr DDSC_BCLSTRS[bx]	; highest cluster on drive (32-bit)
++	mov	dx,es:word ptr DDSC_BCLSTRS+2[bx]
++	sub	ax,1				; total clusters (32-bit)
++	sbb	dx,0
++	mov	word ptr FREED_NCLUSTER[di],ax
++	mov	word ptr FREED_NPCLUS[di],ax
++	mov	word ptr FREED_NCLUSTER+2[di],dx
++	mov	word ptr FREED_NPCLUS+2[di],dx
++f7303_50:
++	push	word ptr FREED_FREEPCL+2[di]	; number of free physical clusters
++	push	word ptr FREED_FREEPCL[di]
++	push	word ptr FREED_SECPCLUS+2[di]	; number of sectors per cluster
++	push	word ptr FREED_SECPCLUS[di]
++	sub	sp,8			; reserve space on stack
++	call	mul32			; multiply these values
++	pop	ax			; to get free physical sectors
++	mov	word ptr FREED_FREESEC[di],ax
++	pop	ax
++	mov	word ptr FREED_FREESEC+2[di],ax
++	add	sp,12			; clean up the stack again
++	push	word ptr FREED_NPCLUS+2[di]	; number of total physical clusters
++	push	word ptr FREED_NPCLUS[di]
++	push	word ptr FREED_SECPCLUS+2[di]	; number of sectors per cluster
++	push	word ptr FREED_SECPCLUS[di]
++	sub	sp,8			; reserve space on stack
++	call	mul32			; multiply these values
++	pop	ax			; to get total physical sectors
++	mov	word ptr FREED_NSECS[di],ax
++	pop	ax
++	mov	word ptr FREED_NSECS+2[di],ax
++	add	sp,12			; clean up the stack again
++	pop	ds
++	xor	ax,ax
++	call	return_AX_CLC
++	clc
++f7303_exit:
++	ret
++
++;	*************************************
++;	***    DOS Function 7305h         ***
++;	***    Extended Disk Read/write   ***
++;	*************************************
++;
++;Entry:	DL	= drive number
++;	DS:BX	= pointer to disk address packet
++;	CX	= FFFFh
++;	SI	= read/write mode
++;Exit:	CF clear
++;Error:	CF set
++;	AX	= error code
++
++func7305:
++	cmp	cx,0ffffh		; is CX=FFFFh given?
++	 je	f7305_10		; yes
++	mov	ax,57h			; if not, return 18h (invalid parameter)
++	stc
++	jmp	f7305_exit		; no, then exit with error
++f7305_10:
++	push	es
++	les	bp,int21regs_ptr	; ES:BX -> disk address structure
++	mov	si,es:reg_SI[bp]
++	mov	bx,es:reg_BX[bp]
++	mov	es,es:reg_DS[bp]
++	mov	FD_FUNC,FD_DDIO
++	dec	dl			; 0-based drive number
++	mov	byte ptr FD_DDIO_DRV_OP,dl
++	mov	ax,es:[bx]		; logical sector number
++	mov	FD_DDIO_STARTLOW,ax
++	mov	ax,es:2[bx]
++	mov	FD_DDIO_STARTHIGH,ax
++	mov	ax,es:4[bx]		; sectors to transfer
++	mov	FD_DDIO_NSECTORS,ax
++	mov	ax,es:6[bx]		; buffer address
++	mov	FD_DDIO_DMAOFF,ax
++	mov	ax,es:8[bx]
++	mov	FD_DDIO_DMASEG,ax
++	test	si,1			; test if read or write operation is requested
++	 jnz	f7305_20
++	mov	byte ptr FD_DDIO_DRV_OP+1,1
++	jmps	f7305_30
++f7305_20:
++	mov	byte ptr FD_DDIO_DRV_OP+1,2
++f7305_30:
++	pop	es
++	call	fdos_nocrit		; call fdos function
++f7305_exit:
++	ret
++
++PCMODE_DATA	dseg	word
++
++	extrn	int21regs_ptr:dword
+diff -u -P -r dr70106/drdos/dos7.equ dr70107/drdos/dos7.equ
+--- dr70106/drdos/dos7.equ	1970-01-01 00:00:00.000000000 +0000
++++ dr70107/drdos/dos7.equ	2004-07-16 20:15:56.000000000 +0000
+@@ -0,0 +1,29 @@
++; DOS7.EQU - Definitions for DOS 7 data structures
++;
++; This file is part of
++; The DR-DOS/OpenDOS Enhancement Project - http://www.drdosprojects.de
++; Copyright (c) 2002-2004 Udo Kuhnt
++
++FREED_SIZE	equ	word ptr 00h	; size of structure
++FREED_VER	equ	word ptr 02h	; version of structure
++FREED_SECPCLUS	equ	dword ptr 04h	; sectors per cluster
++FREED_BYTEPSEC	equ	dword ptr 08h	; bytes per sector
++FREED_FREECL	equ	dword ptr 0ch	; available clusters
++FREED_NCLUSTER	equ	dword ptr 10h	; number of clusters on drive
++FREED_FREESEC	equ	dword ptr 14h	; number of physical sectors available on drive
++FREED_NSECS	equ	dword ptr 18h	; number of physical sectors on drive
++FREED_FREEPCL	equ	dword ptr 1ch	; available physical allocation units
++FREED_NPCLUS	equ	dword ptr 20h	; number of physical allocation units
++;FREED_RESERVED	equ	24h	; reserved bytes
++FREED_LEN	equ	24h	; length of data
++
++EDPB_DEVHEAD	equ	dword ptr 13h	; device driver header
++EDPB_DPBFLAGS	equ	byte ptr 18h	; DPB flags (undocumented)
++EDPB_LINK	equ	dword ptr 19h	; link to next DPB
++EDPB_FSINFO	equ	word ptr 25h	; file system info sector
++EDPB_BOOTBAK	equ	word ptr 27h	; backup of boot sector
++EDPB_BDATADDR	equ	dword ptr 29h	; sector address of cluster #2
++EDPB_BCLSTRS	equ	dword ptr 2dh	; highest cluster number
++EDPB_BFATRECS	equ	dword ptr 31h	; number of sectors per FAT
++EDPB_BBLOCK	equ	dword ptr 39h	; next block to allocate
++EDPB_LEN	equ	3dh		; length of Extended DPB structure
+diff -u -P -r dr70106/drdos/dosmem.a86 dr70107/drdos/dosmem.a86
+--- dr70106/drdos/dosmem.a86	2003-10-03 19:10:40.000000000 +0000
++++ dr70107/drdos/dosmem.a86	2004-07-10 18:22:14.000000000 +0000
+@@ -105,6 +105,7 @@
+ 	xor	dx,dx			; yes, owner = 0 means free block
+ func49_20:
+ 	mov	DMD_PSP,dx		; free/set new owner
++	call	merge_mem		; merge with adjacent free blocks
+ ;	jmps	memory_exit
+ 
+ ; centralised exit point to unlock system tables
+diff -u -P -r dr70106/drdos/drdos.inp dr70107/drdos/drdos.inp
+--- dr70106/drdos/drdos.inp	1970-01-01 00:00:00.000000000 +0000
++++ dr70107/drdos/drdos.inp	2005-01-15 18:26:10.000000000 +0000
+@@ -0,0 +1,4 @@
++drdos.tmp=header.obj,pcmif.obj,cio.obj,disk.obj,ioctl.obj,misc.obj,support.obj,
++dosmem.obj,error.obj,process.obj,network.obj,int2f.obj,fdos.obj,cdevio.obj,fioctl.obj,
++fcbs.obj,redir.obj,dirs.obj,buffers.obj,bdevio.obj,cmdline.obj,history.obj,dos7.obj
++[map, data[origin[0000]]]
+diff -u -P -r dr70106/drdos/fdos.a86 dr70107/drdos/fdos.a86
+--- dr70106/drdos/fdos.a86	2003-06-11 00:01:16.000000000 +0000
++++ dr70107/drdos/fdos.a86	2004-01-25 20:31:30.000000000 +0000
+@@ -383,6 +383,7 @@
+ 	public	toupper			; upper case a character
+ 	Public	unparse
+ 	public	update_dir_fat		; flush DIR then FAT to disk
++	public	get_path_drive		; get drive number for given path
+ 
+ 	public	fdos_getdpb	; 0-disk information
+ 	public	fdos_mkdir	; 1-make directory
+diff -u -P -r dr70106/drdos/fdos.equ dr70107/drdos/fdos.equ
+--- dr70106/drdos/fdos.equ	2003-08-15 22:27:24.000000000 +0000
++++ dr70107/drdos/fdos.equ	2004-02-27 14:10:22.000000000 +0000
+@@ -125,16 +125,17 @@
+ DDSC_LINK	equ	dword ptr 25		; next drive's DDSC
+ DDSC_BLOCK	equ	word ptr 29		; next block to allocate
+ DDSC_FREE	equ	word ptr 31		; total free clusters on drive
+-DDSC_BDATADDR	equ	word ptr 33		; sector address of cluster #2 (32-bit)
+-DDSC_BCLSTRS	equ	dword ptr 37		; # of clusters on disk (32-bit)
+-DDSC_BFATRECS	equ	dword ptr 41		; # of sectors per FAT (32-bit)
+-DDSC_BBLOCK	equ	dword ptr 45		; next block to allocate (32-bit)
+-DDSC_BFREE	equ	dword ptr 49		; total free clusters on drive (32-bit)
+-DDSC_FSFLAGS	equ	word ptr 53		; FAT mirroring flags
+-DDSC_FSVER	equ	word ptr 55		; version of file system
+-DDSC_FSROOT	equ	dword ptr 57		; starting cluster of root directory
+-DDSC_FSINFO	equ	word ptr 61		; sector number of file system info block
+-DDSC_LEN	equ	63
++DDSC_BFREE	equ	dword ptr 33		; total free clusters on drive (32-bit)
++DDSC_FSFLAGS	equ	word ptr 37		; FAT mirroring flags
++DDSC_FSINFO	equ	word ptr 39		; sector number of file system info block
++DDSC_BOOTBAK	equ	word ptr 41		; sector number of backup boot sector
++DDSC_BDATADDR	equ	dword ptr 43		; sector address of cluster #2 (32-bit)
++DDSC_BCLSTRS	equ	dword ptr 47		; # of clusters on disk (32-bit)
++DDSC_BFATRECS	equ	dword ptr 51		; # of sectors per FAT (32-bit)
++DDSC_FSROOT	equ	dword ptr 55		; starting cluster of root directory
++DDSC_BBLOCK	equ	dword ptr 59		; next block to allocate (32-bit)
++DDSC_FSVER	equ	word ptr 63		; version of file system
++DDSC_LEN	equ	65
+ 
+ 
+ 
+diff -u -P -r dr70106/drdos/funcs.fdo dr70107/drdos/funcs.fdo
+--- dr70106/drdos/funcs.fdo	2003-12-13 22:42:12.000000000 +0000
++++ dr70107/drdos/funcs.fdo	2004-08-13 14:19:50.000000000 +0000
+@@ -1638,7 +1638,9 @@
+ 	jmp	fdos_ED_ROOM		; else end of directory
+ 
+ search_n10:
++	mov	finddfcb_mask,0		; find everything, including labels
+ 	call	finddfcb		; find next matching entry
++	mov	finddfcb_mask,DA_VOLUME*256	; restore mask
+ 	 jz	search_next_err		; if not found
+ 	mov	al,attributes		; get attributes that we support
+ if PASSWORD
+@@ -1912,8 +1914,10 @@
+ 	lodsw				; get sector size in bytes
+ 	mov	es:DDSC_SECSIZE[di],ax
+ 
++	xor	ax,ax
+ 	lodsb				; get sectors/allocation unit
+-	dec	ax			; get cluster mask
++;	dec	ax			; get cluster mask
++	dec	al			; get cluster mask
+ 	mov	es:DDSC_CLMSK[di],al	; store cluster mask
+ 	lodsw				; get FAT address
+ 	mov	es:DDSC_FATADDR[di],ax
+@@ -2017,10 +2021,12 @@
+ 	mov	es:word ptr DDSC_FSROOT[di],ax
+ 	lodsw				; get high word
+ 	mov	es:word ptr DDSC_FSROOT+2[di],ax
+-	lodsw				; get sector number of file system info block
++	lodsw				; get sector number of file system info sector
+ 	mov	es:DDSC_FSINFO[di],ax
++	lodsw				; get sector number of backup boot sector
++	mov	es:DDSC_BOOTBAK[di],ax
+ 
+-	mov	es:DDSC_DIRADDR[di],0	; no special root dir area for FAT32
++	mov	es:DDSC_DIRADDR[di],0ffffh	; special case for FAT32
+ 	push	es:word ptr DDSC_BFATRECS+2[di]	; multiply sectors per FAT
+ 	push	es:word ptr DDSC_BFATRECS[di]
+ 	mov	ax,0			; with number of FATs
+@@ -2040,10 +2046,10 @@
+ 	 je	bpb2ddsc42		; yes, then leave it
+ 	mov	es:word ptr DDSC_DATADDR[di],0	; else mark this entry as invalid
+ bpb2ddsc42:
+-	mov	ax,-18[si]		; get low word of size
+-	mov	dx,-16[si]		; get high word of size
+-	sub	ax,es:DDSC_BDATADDR[di]	; subtract non-data portion
+-	sbb	dx,es:DDSC_BDATADDR+2[di]
++	mov	ax,-20[si]		; get low word of size
++	mov	dx,-18[si]		; get high word of size
++	sub	ax,es:word ptr DDSC_BDATADDR[di]	; subtract non-data portion
++	sbb	dx,es:word ptr DDSC_BDATADDR+2[di]
+ 	xor	cx,cx
+ 	mov	cl,es:DDSC_CLSHF[di]	; cluster shift value
+ 	test	cl,cl			; cluster size one?
+@@ -2053,9 +2059,12 @@
+ 	rcr	ax,1
+ 	loop	bpb2ddsc43
+ bpb2ddsc44:
++	add	ax,1			; +1 to get number of highest cluster
++	adc	dx,0
+ 	mov	es:word ptr DDSC_BCLSTRS[di],ax
+ 	mov	es:word ptr DDSC_BCLSTRS+2[di],dx
+ 	xor	ax,ax
++	mov	es:DDSC_NCLSTRS[di],0
+ 	mov	es:word ptr DDSC_BBLOCK[di],ax	; next block = 0
+ 	mov	es:word ptr DDSC_BBLOCK+2[di],ax
+ 	dec	ax
+diff -u -P -r dr70106/drdos/header.a86 dr70107/drdos/header.a86
+--- dr70106/drdos/header.a86	2003-04-29 10:52:26.000000000 +0000
++++ dr70107/drdos/header.a86	2004-12-12 21:34:46.000000000 +0000
+@@ -106,7 +106,8 @@
+ 	dw	pcmode_init-PADDING-3
+ ;	jmp	pcmode_reinit	; PCMODE Re Init Entry
+ 	db	0E9h
+-	dw	pcmode_reinit-PADDING-6
++;	dw	pcmode_reinit-PADDING-6
++	dw	pcmode_init2-PADDING-6
+ 
+ 	Public	pcmode_dseg, os_version, patch_version
+ 
+@@ -286,11 +287,11 @@
+ 
+ msdos_file_tbl	dw	-1		; 00A6 1st HDB entries
+ 		dw	-1		; Pointer to next Entry (None)
+-		dw	5		; Number of Entries
++		dw	4		; Number of Entries
+ 
+-		rb	5*DHNDL_LEN	; Reserve 5 Internal Handles
++		rb	4*DHNDL_LEN	; Reserve 5 Internal Handles
+ 
+-;	rb	1fbh - (offset $ - offset dos_data)
++	rb	1fbh - (offset $ - offset dos_data)
+ 
+ 	Public	savbuf
+ ;savbuf		rb	128		; cmdline editing temp buffer
+@@ -667,10 +668,10 @@
+ 	db	 000h, 000h, 000h, 000h, 000h, 000h, 000h, 000h
+ info7_len	equ	word ptr (offset $ - offset DBCS_tbl)
+ 
++;    org 0d12h - FIXED_DATA_START    
++    org 0d10h - FIXED_DATA_START    
+ 
+-
+-    org 0d12h - FIXED_DATA_START    
+-
++true_version	dw	107h			; true DOS version
+ dos_version	dw	6			; our DOS version number
+ 
+ ; Don't know what these are for.....
+@@ -1367,8 +1368,10 @@
+ ;			BX	First Available Paragraph	
+ ;			DL	Initial Drive
+ ;			DS	PCM Dseg
++;			ES	Interrupt Stubs Seg
+ ;
+ pcmode_init:
++	mov	cs:int_stubs_seg,es
+ 	and	cs:patch_version,not DOSINROM
+ 					; won't clear if we are in ROM...
+ 	mov	cs:pcmode_dseg,ds	; save PCM Dseg
+@@ -1420,22 +1423,50 @@
+ 
+ 	mov	cx,40h-2Ah		; 2A-3F point at IRET in DOS Data Seg
+ 	mov	di,INT2A_OFFSET
++	mov	bp,cs:int_stubs_seg
++	xor	bx,bx
+ dummy_vecs_loop:
++	cmp	cx,40h-31h
++	 je	dummy_vecs_skip
++	push	es
++	mov	es,bp
++	mov	es:byte ptr [bx],0eah	; jmp far instruction
+ 	mov	ax,offset DummyIRET	; point at an IRET
+-	stosw				; do the offset
+-	mov	ax,ds
+-	stosw				; then the segment
++;	stosw				; do the offset
++	mov	es:1[bx],ax
++;	mov	ax,ds
++;	stosw				; then the segment
++	mov	es:3[bx],ds
++	pop	es
++	mov	es:[di],bx
++	mov	es:2[di],bp
++	add	bx,5
++dummy_vecs_skip:
++	add	di,4
+ 	loop	dummy_vecs_loop
+ 
+ 
+ 	mov	si,offset def_data_vecs	; the following vector point to
+ 	mov	cx,no_def_data_vecs	; pcmode DATA seg
+ def_data_vecs_loop:
++	push	es
++	mov	es,bp
+ 	lods cs:ax ! mov di,ax		; Get the Vector Offset (from CS)
+-	db	2Eh			; CS:
+-	movsw				; copy service routine offset
++;	db	2Eh			; CS:
++;	movsw				; copy service routine offset
++	mov	es:byte ptr [bx],0eah	; jmp far
++	mov	ax,cs:[si]
++	add	si,2
++	mov	es:1[bx],ax
+ 	mov	ax,ds			; finally fixup the segment too
++;	stosw
++	mov	es:3[bx],ax
++	pop	es
++	mov	ax,bx
++	stosw
++	mov	ax,bp
+ 	stosw
++	add	bx,5
+ 	loop	def_data_vecs_loop
+ 
+ 	mov	es:byte ptr .INT30_OFFSET,0EAh
+@@ -1474,6 +1505,136 @@
+ 	mov	ds:dmd_root,es		; Save the DMD address in root
+ 	retf
+ 
++;	Entry:		DS	PCM Dseg
++;			ES	Interrupt Stubs Seg
++
++pcmode_init2:
++	mov	cs:int_stubs_seg,es
++;	and	cs:patch_version,not DOSINROM
++					; won't clear if we are in ROM...
++	mov	cs:pcmode_dseg,ds	; save PCM Dseg
++	mov	ds:instanceSeg,ds	; fixup pointer to instance items
++
++; removed this as VxD no longer required   BAP
++;	mov	ds:vxdNameSeg,ds	;  and vxdName
++
++;	add	ds:vxdName,dl		; fixup drive letter
++	mov	ds:word ptr buf_ptr+2,ds
++	mov	ds:word ptr file_ptr+2,ds
++	mov	ds:word ptr fcb_ptr+2,ds
++	mov	ax,word ptr fcb_ptr
++	mov	cl,4
++	shr	ax,cl
++	and	word ptr fcb_ptr,15
++	add	word ptr fcb_ptr+2,ax
++;	push	ax			; Save the memory size
++;	push	bx			; First Free Paragraph
++;	mov	ds:current_dsk,dl	; save initial drive
++;	inc	dl			; make drive one based
++;	mov	ds:bootDrv,dl		;  and save for func 3305
++	mov	ax,ds			; AX = PCMode Data
++	mov	ds:word ptr fdos_stub+WORD,ax
++	add	ds:dummy_sysdat,ax	; point dummy "sysdat" at a zero word
++					;  ie. dummy "secure path" segment
++	mov	si,offset countryTable
++countryFixupLoop2:
++	mov	ds:word ptr 3[si],ds	; fixup the segment
++	add	si,5			; onto the next entry
++	cmp	ds:word ptr 3[si],0	; done the lot yet ?
++	 je	countryFixupLoop2
++	mov	es,ax			; ES -> PCMode Data
++	mov	di,offset stub_entries	; ES:DI -> stub segs
++	mov	cx,NUM_STUB_ENTRIES	; entries to initialise
++stubs_loop2:
++	add	di,WORD			; skip the offset
++	stosw				; fixup segment
++	loop	stubs_loop2		; do the next one
++	mov	di,offset share_stub	; fixup the SHARE entries
++	mov	cx,NUM_SHARE_STUB_ENTRIES
++share_loop2:
++	add	di,WORD			; skip the offset
++	stosw				; fixup segment
++	loop	share_loop2
++;	mov	cx,0
++	mov	es,cx			; Initialize the DOS vectors
++
++;	mov	ax,es:.INT2F_OFFSET	; remember address of BIOS Int 2F
++;	mov	ds:int2FBiosHandler,ax
++;	mov	ax,es:.INT2F_SEGMENT
++;	mov	ds:int2FBiosHandler+2,ax
++	mov	ds:int2FNext+2,ds	; fixup seg of out stub
++
++	mov	cx,40h-2Ah		; 2A-3F point at IRET in DOS Data Seg
++	mov	di,INT2A_OFFSET
++	mov	bp,cs:int_stubs_seg
++	xor	bx,bx
++	push	es
++	mov	es,bp
++dummy_vecs_loop2:
++	cmp	cx,40h-31h
++	 je	dummy_vecs_skip2
++;	mov	ax,offset DummyIRET	; point at an IRET
++;	stosw				; do the offset
++;	mov	ax,ds
++	mov	es:3[bx],ds
++;	stosw				; then the segment
++	add	bx,5
++dummy_vecs_skip2:
++	loop	dummy_vecs_loop2
++	pop	es
++
++;	mov	si,offset def_data_vecs	; the following vector point to
++	mov	cx,no_def_data_vecs	; pcmode DATA seg
++	push	es
++	mov	es,bp
++def_data_vecs_loop2:
++;	lods cs:ax ! mov di,ax		; Get the Vector Offset (from CS)
++;	mov	ax,cs:[si]
++;	db	2Eh			; CS:
++;	movsw				; copy service routine offset
++;	mov	ax,ds			; finally fixup the segment too
++;	stosw
++	mov	es:3[bx],ds
++	add	bx,5
++	loop	def_data_vecs_loop2
++	pop	es
++
++;	mov	es:byte ptr .INT30_OFFSET,0EAh
++					; fixup CALL 5 JMPF
++
++	mov	si,offset bdosInstanceFixups
++InstanceFixupLoop2:
++	mov	ds:2[si],ds		; fixup data segment
++	add	si,6			; onto next item
++	mov	ax,ds:[si]		; still BDOS ?
++	or	ax,ds:2[si]
++	 jnz	InstanceFixupLoop2	; yep, do another one
++
++	push	cs			; we will have a RETF
++	call	pcmode_reinit		; to return from this call
++
++;	pop	ax			; First Free Paragraph
++;	pop	dx			; Restore the BIOS memory size
++;	sub	dx,ax			; convert to TPA size
++;	dec	dx			; Decrement the Size by DMD Size
++;	push	ax	
++;	add	ax,dx			; AX = possible next DMD
++;	mov	es,ax
++;	mov	al,IDZ			; assume no extra DMD's
++;	cmp	al,es:DMD_ID		; have we extra one ?
++;	 jne	pcmode_init2_10
++;	mov	al,IDM			; yes, no longer end of chain
++;	dec	dx			; decrement by size of existing DMD
++;pcmode_init2_10:	
++;	pop	es
++;	mov	es:DMD_ID,al		; Last DMD in list
++;	mov	es:DMD_PSP,0000h	; This is Free Memory Owning PSP == 0
++;	mov	es:DMD_LEN,dx		; Save Memory Length
++;	mov	es:word ptr DMD_NAME,'S'+256*'D'
++;	mov	es:DMD_NAME+2,0
++;	mov	ds:dmd_root,es		; Save the DMD address in root
++	retf
++
+ eject
+ ;	
+ ;
+@@ -1571,6 +1732,7 @@
+ 
+ no_def_data_vecs	equ	(offset $ - offset def_data_vecs)/4
+ 
++int_stubs_seg	dw	0
+ 
+ end
+ 
+Only in dr70106/ibmdos: ibmdos.inp
+Only in dr70106/ibmdos: ibmdos.map
+Only in dr70106/ibmdos: ibmdos.sym
+diff -u -P -r dr70106/drdos/make.bat dr70107/drdos/make.bat
+--- dr70106/drdos/make.bat	2002-07-04 21:36:00.000000000 +0000
++++ dr70107/drdos/make.bat	2005-01-15 18:25:38.000000000 +0000
+@@ -81,14 +81,17 @@
+ %LOCTOOLS%\rasm_sh %LOCTOOLS%\rasm86.exe . .\cmdline.a86 .\bin\cmdline.obj
+ IF ERRORLEVEL 1 GOTO FAILED
+ 
+-copy ibmdos.inp .\BIN
++%LOCTOOLS%\rasm_sh %LOCTOOLS%\rasm86.exe . .\dos7.asm .\bin\dos7.obj
++IF ERRORLEVEL 1 GOTO FAILED
++
++copy drdos.inp .\BIN
+ CD .\BIN
+-..\%LOCTOOLS%\linkcmd.exe ibmdos[i]
++..\%LOCTOOLS%\linkcmd.exe drdos[i]
+ IF ERRORLEVEL 1 GOTO FAILED
+ CD ..
+-%LOCTOOLS%\bin2asc -ob -s128 .\BIN\ibmdos.tmp .\BIN\ibmdos.com
++%LOCTOOLS%\bin2asc -ob -s128 .\BIN\drdos.tmp .\BIN\drdos.sys
+ IF ERRORLEVEL 1 GOTO FAILED
+-%LOCTOOLS%\compbdos .\BIN\ibmdos.com
++%LOCTOOLS%\compbdos .\BIN\drdos.sys
+ IF ERRORLEVEL 1 GOTO FAILED
+ goto exit
+ 
+diff -u -P -r dr70106/drdos/misc.a86 dr70107/drdos/misc.a86
+--- dr70106/drdos/misc.a86	1997-04-16 16:25:40.000000000 +0000
++++ dr70107/drdos/misc.a86	2004-12-12 21:45:06.000000000 +0000
+@@ -407,6 +407,7 @@
+ 
+ 	Public	func30
+ func30:
++	mov	cl,al			; save value of AL
+ if DOS5
+ 	mov	es,current_psp		; version is kept in the PSP
+ 	mov	ax,PSP_VERSION
+@@ -414,8 +415,14 @@
+ 	mov	ax,dos_version		; version returned in AX
+ endif
+ ReturnVersionNumber:
+-	xor	bx,bx			; zero BX and CX
+-	xor	cx,cx
++	xor	bx,bx			; zero BX
++	cmp	cl,1			; version flag requested?
++	 je	f30_10			; yes, then return 0
++;	cmp	ax,dos_version		; has the version number been faked?
++;	 je	f30_10			; yes, then report OEM code 0 (PC DOS)
++	mov	bh,0eeh			; OEM = EEh (DR DOS)
++f30_10:
++	xor	cx,cx			; zero CX
+ 	call	return_BX
+ 	call	return_CX
+ 	jmp	return_AX_CLC
+@@ -456,7 +463,14 @@
+ 
+ if DOS5
+ f33_60:
+-	mov	reg_BX[bp],TRUE_VERSION	; return version number
++	mov	es,current_psp
++	mov	ax,PSP_VERSION		; reported version for current program
++	cmp	ax,dos_version		; has this been faked with SETVER?
++	mov	reg_BX[bp],ax
++	 jne	f33_61			; yes, then fake the true version, too
++	mov	ax,dos_version-2	; if not, then honestly return true version number
++	mov	reg_BX[bp],ax
++f33_61:
+ 	mov	ax,patch_version
+ 	mov	reg_DX[bp],ax		; return revision+HMA
+ 	ret
+diff -u -P -r dr70106/drdos/pcmif.a86 dr70107/drdos/pcmif.a86
+--- dr70106/drdos/pcmif.a86	1997-04-16 16:02:44.000000000 +0000
++++ dr70107/drdos/pcmif.a86	2004-07-14 20:36:46.000000000 +0000
+@@ -559,6 +559,7 @@
+ int26_10:				; Common Direct Disk I/O code
+ 	cld
+ 	push ds ! push es
++	push	di
+ 	push	dx			; save DX for FLASHCARD
+ 	push ds ! pop es		; ES = callers DS
+ 	call	get_dseg		; Get PCMODE Data Segment
+@@ -646,6 +647,7 @@
+ 	dec	indos_flag		; Update the INDOS_FLAG
+ 	sti
+ 	pop	dx
++	pop	di
+ 	pop es ! pop ds			; restore callers registers
+ 	retf				; leave flags on stack
+ 
+@@ -905,7 +907,7 @@
+ 	extrn	func5C:near, func5D:near, func5E:near, func5F:near
+ 	extrn	func60:near, func62:near, func63:near, func65:near
+ 	extrn	func66:near, func67:near, func68:near, func69:near
+-	extrn	func6C:near
++	extrn	func6C:near, func73:near
+ 
+ PCM_RODATA	CSEG	WORD		
+ 	Public	pcmode_ft, pcmode_ftl
+@@ -1019,6 +1021,13 @@
+ 	dw	func68			; (6A) Commit File (again)
+ 	dw	invalid_function	; (6B) Unknown DOS 4
+ 	dw	func6C			; (6C) Extended Open/Create
++	dw	ms_zero_AL		; (6D) Unused DOS function (AL = 0)
++	dw	ms_zero_AL		; (6E) Unused DOS function (AL = 0)
++	dw	ms_zero_AL		; (6F) Unused DOS function (AL = 0)
++	dw	ms_zero_AL		; (70) Unused DOS function (AL = 0)
++	dw	ms_zero_AL		; (71) Unused DOS function (AL = 0)
++	dw	ms_zero_AL		; (72) Unused DOS function (AL = 0)
++	dw	func73			; (73) DOS 7 FAT32 functions
+ pcmode_ftl	equ	(offset $ - offset pcmode_ft)/2
+ 	;**************************
+ 	;* Do Not Move This Entry *
+diff -u -P -r dr70106/drdos/pcmode.equ dr70107/drdos/pcmode.equ
+--- dr70106/drdos/pcmode.equ	1997-04-16 17:10:58.000000000 +0000
++++ dr70107/drdos/pcmode.equ	2004-12-12 21:15:30.000000000 +0000
+@@ -38,7 +38,7 @@
+ TRUE	   	equ	0FFFFh		; value of TRUE
+ FALSE	   	equ	0		; value of FALSE
+ 
+-TRUE_VERSION	equ	6
++;TRUE_VERSION	equ	0107h
+ 
+ IDLE_DETECT	equ	TRUE		; Check for IDLE Process's
+ 
+diff -u -P -r dr70106/drdos/utils.fdo dr70107/drdos/utils.fdo
+--- dr70106/drdos/utils.fdo	2003-10-01 18:38:52.000000000 +0000
++++ dr70107/drdos/utils.fdo	2005-01-24 17:30:26.000000000 +0000
+@@ -551,7 +551,7 @@
+ ; On Entry:
+ ;	es:di -> path name
+ ; On Exit:
+-;	AL = path_drive = sepcified or default drive
++;	AL = path_drive = specified or default drive
+ ;	es:di -> past drive name
+ ;	cf = 1 if illegal drive name
+ 
+@@ -2364,7 +2364,7 @@
+ join_name	db	'd:\filename.ext',0
+ 
+ 		db	'Patches to original OpenDOS source code '
+-		db	'Copyright (c) 2002-2003 Udo Kuhnt'
++		db	'Copyright (c) 2002-2005 Udo Kuhnt'
+ 
+ BDOS_CODE	cseg
+ 

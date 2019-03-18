@@ -1,0 +1,38 @@
+There is currently one known bug in the DR-DOS kernel which apparently plagues
+all versions from 7.01 to 7.03. This bug prevents DR-DOS from booting if there
+are very large FAT32 partitions on any hard disks in the system; it will simply
+hang. I do not know what causes this problem, but I will probably fix it in one
+of the next patches. Until then, as a work-around, use DR-DOS 7.03 and set the
+type of any extended partitions that point to these FAT32 partitions to 0fh.
+Since DR-DOS 7.03 does not recognize this type at boot time, it will simply not
+register these partitions. This will not affect the DRFAT32 driver, so you can
+still work with your FAT32 partitions normally.
+
+Update: This bug seems to be caused by loops in the partition tables, i.e.
+extended partition records pointing to the same or a lower cylinder number.
+I have included a work-around in v7.01.03 which should fix this. This should
+also solve the problem of FAT16 partitions beyond the 7.8 GB barrier being
+registered without LBA support.
+
+Warning: Beginning with version 7.01.04, DR-DOS is able to use the LBA BIOS
+functions to access hard disk partitions outside the 7.8 GB limit defined by
+the old CHS (cylinder, head & sector) system. This is no problem for any disk
+tools that use DOS functions to access these partitions, however, there are
+many old tools that are not LBA-compliant which use low-level BIOS calls to
+access hard disks. When used on partitions that are not within the space
+accessible via CHS these tools could possibly write data to the wrong sectors
+on the hard disk and thus cause severe damage. This is not a bug in DR-DOS, but
+a limitation of these tools. Some of the disk tools that are included in the
+distributions of DR-DOS 7.0x like fdisk, format, diskopt, etc. may also fall
+into this category. Until they have been tested on LBA partitions and it has
+been found that they are safe to use, do not use them without making a backup
+of your hard disk first.
+
+Warning: Beginning with version 7.01.05, DR-DOS supports FAT16 partitions with
+a cluster size of 64 KB. This feature has been tested and found to be working.
+However, until someone has done extensive tests and it has been found that it
+is generally safe to use, use precautions before using it on partitions that
+contain valuable data. Also, please note that many disk tools do not expect to
+see this feature on a DOS based machine, so they most likely do not support it.
+Windows NT and FreeDOS support it, so tools written for these operating systems
+should be safe to use.

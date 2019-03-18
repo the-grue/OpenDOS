@@ -1,0 +1,214 @@
+diff -u -P -r dr70101/ibmbio/biosinit.a86 dr70102/ibmbio/biosinit.a86
+--- dr70101/ibmbio/biosinit.a86	Wed Apr 16 10:59:48 1997
++++ dr70102/ibmbio/biosinit.a86	Tue Jul 16 13:04:04 2002
+@@ -114,7 +114,10 @@
+ 
+ 		db	'Copyright (c) 1983,1996 '
+ 		db	'Caldera, Inc. All Rights Reserved '
+-		db	'XXXX-0000-987654321X'
++		db	'XXXX-0000-987654321X '
++
++		db	'Patches to original OpenDOS source code '
++		db	'Copyright (c) 2002 Udo Kuhnt'
+ 
+ 
+ 	Public	biosinit
+diff -u -P -r dr70101/ibmbio/biosmsgs.asm dr70102/ibmbio/biosmsgs.asm
+--- dr70101/ibmbio/biosmsgs.asm	Thu Apr 17 17:23:02 1997
++++ dr70102/ibmbio/biosmsgs.asm	Tue Jul 16 12:46:00 2002
+@@ -27,7 +27,11 @@
+ 	public	_starting_dos_msg
+ 	public	starting_dos_msg
+ starting_dos_msg	label	byte
+-_starting_dos_msg	db	CR, LF, "Starting DOS...", CR, LF, NUL
++_starting_dos_msg	db	CR, LF, "Starting Caldera OpenDOS 7.01.02", CR, LF, NUL
++	public	_lba_supp_msg
++	public	lba_supp_msg
++lba_supp_msg		label	byte
++_lba_supp_msg		db	"Supported version of int 13 extensions: ", NUL
+ 
+ RCODE	ends
+ 
+diff -u -P -r dr70101/ibmbio/biosmsgs.def dr70102/ibmbio/biosmsgs.def
+--- dr70101/ibmbio/biosmsgs.def	Thu Apr 17 09:53:30 1997
++++ dr70102/ibmbio/biosmsgs.def	Mon Jul 15 23:48:00 2002
+@@ -6,3 +6,5 @@
+ 	extrn	div_by_zero_msg	: byte
+ 	extrn	_starting_dos_msg	: byte
+ 	extrn	starting_dos_msg	: byte
++	extrn	_lba_supp_msg		: byte
++	extrn	lba_supp_msg		: byte
+diff -u -P -r dr70101/ibmbio/disk.asm dr70102/ibmbio/disk.asm
+--- dr70101/ibmbio/disk.asm	Wed Apr 16 10:11:36 1997
++++ dr70102/ibmbio/disk.asm	Tue Jul 16 12:43:56 2002
+@@ -84,6 +84,7 @@
+ 	include	BPB.EQU			; BIOS parameter block equates
+ 	include	UDSC.EQU		; unit descriptor equates
+ 	include	DRIVER.EQU		; device driver equates
++	include KEYS.EQU		; common key definitions
+ 
+ 
+ int_____DISK_INT macro
+@@ -103,6 +104,7 @@
+ DOS30_ID	equ	4		; DOS 3.0 partition, < 65536 sectors
+ DOSEX_ID	equ	5		; DOS 3.3 extended partition
+ DOS331_ID	equ	6		; COMPAQ DOS 3.31 partition > 32 Mb
++EXTX_ID 	equ	0fh		; Win95 ExtendedX partition
+ 
+ ; Now for the secure partition types
+ SEC_ID          equ     0C0h            ; New DR secure partition types
+@@ -170,6 +172,7 @@
+ 	extrn	bpbtbl:word
+ 	extrn	req_off:word
+ 	extrn	req_seg:word
++	extrn	output_msg:near
+ 
+ 
+ udsc_root	label	dword
+@@ -2182,6 +2185,11 @@
+ 
+ log_flag	dw	LOG_PRIM	; scan for primary only initially
+ 
++ver_1x		db	"1.x",CR,LF,NUL
++ver_20		db	"2.0/EDD-1.0",CR,LF,NUL
++ver_21		db	"2.1/EDD-1.1",CR,LF,NUL
++ver_30		db	"EDD-3.0",CR,LF,NUL
++
+ hard_init:	; setup all hard disk units
+ ;---------
+ ;	mov	log_flag,LOG_PRIM	; log in primary only initially
+@@ -2203,6 +2211,40 @@
+ 	mov	dl,80h			; start with first hard disk
+ hardi1:
+ 	pushx	<cx, dx>		; save drive count, physical drive
++	mov	ah,ROS_LBACHK		; int 13 extensions available?
++	mov	bx,55aah
++	int_____DISK_INT
++	jc	hardi2
++	cmp	bx,0aa55h
++	jnz	hardi2
++	cmp	int13ex_ver,0
++	jnz	hardi3
++	mov	si,offset CGROUP:lba_supp_msg
++	call	output_msg
++	cmp	ah,01
++	jnz	ver20
++	lea	si,ver_1x
++	call	output_msg
++	jmp	hardi3
++ver20:
++	cmp	ah,20
++	jnz	ver21
++	lea	si,ver_20
++	call	output_msg
++	jmp	hardi3
++ver21:
++	cmp	ah,21
++	jnz	ver30
++	lea	si,ver_21
++	call	output_msg
++	jmp	hardi3
++ver30:
++	lea	si,ver_30
++	call	output_msg	
++hardi3:
++	mov	int13ex_ver,ah		; version of int 13 extensions
++	mov	int13ex_bits,cx		; int 13 API support bitmap
++hardi2:
+ 	call	login_hdisk		; find all partitions on hard disk
+ 	popx	<dx, cx>		; restore physical drive, drive count
+ 	inc	dx			; next physical hard disk
+@@ -2309,6 +2351,9 @@
+ log_h6a:
+ ;** SECURE PARTITIONS **
+ 	cmp	al,DOSEX_ID		; DOS 3.3 extended partition found?
++	 je	log_h6b
++log_h6c:
++	cmp	al,EXTX_ID
+ 	 jne	log_h7
+ log_h6b:
+ 	mov	dh,1[si]		; get head # for next table
+@@ -2610,6 +2655,10 @@
+ nhard		db	0		; # of hard disk partitions
+ nfloppy		db	0		; # of floppy drives
+ 
++int13ex_ver	db	0		; version of int 13 extensions
++		db	0
++int13ex_bits	dw	0		; int 13 API support bitmap
++
+ 	Public	init_runit
+ init_runit	db	0		; poked with ROS Unit at boot
+ 
+diff -u -P -r dr70101/ibmbio/ibmros.equ dr70102/ibmbio/ibmros.equ
+--- dr70101/ibmbio/ibmros.equ	Wed Apr 16 10:23:46 1997
++++ dr70102/ibmbio/ibmros.equ	Mon Jul 15 21:35:06 2002
+@@ -67,6 +67,7 @@
+ ROS_DSKCHG	equ	16h		; check disk change status
+ ROS_SETTYPE	equ	17h		; set disk type for format
+ ROS_SETMEDIA	equ	18h		; set media type for format
++ROS_LBACHK	equ	41h		; int 13 extensions install check
+ 
+ PRN_ERROR	equ	00101001b	; printer error bits
+ PRN_NOTBUSY	equ	10000000b
+diff -u -P -r dr70101/ibmbio/init.asm dr70102/ibmbio/init.asm
+--- dr70101/ibmbio/init.asm	Thu Jul  4 21:24:40 2002
++++ dr70102/ibmbio/init.asm	Tue Jul 16 00:08:00 2002
+@@ -848,21 +848,31 @@
+ 
+ init0	endp
+ 
+-get_boot_options:
++	public	output_msg
++output_msg:
+ ;----------------
+ ; On Entry:
+-;	None
++;	si = offset CGROUP:message_msg
+ ; On Exit:
+-;	AX = boot options
+-	mov	si,offset CGROUP:starting_dos_msg
++;	None
+ 	lodsb				; get 1st character (never NULL)
+-get_boot_options10:
++output_msg10:
+ 	mov	ah,0Eh
+ 	mov	bx,7
+ 	int	VIDEO_INT		; TTY write of character	
+ 	lodsb				; fetch another character
+ 	test	al,al			; end of string ?
+-	 jnz	get_boot_options10
++	 jnz	output_msg10
++	ret
++
++get_boot_options:
++;----------------
++; On Entry:
++;	None
++; On Exit:
++;	AX = boot options
++	mov	si,offset CGROUP:starting_dos_msg
++	call	output_msg
+ 	call	option_key		; poll keyboard for a while
+ 	 jnz	get_boot_options20	; if key available return that
+ 	mov	ah,2			; else ask ROS for shift state
+diff -u -P -r dr70101/ibmbio/keys.equ dr70102/ibmbio/keys.equ
+--- dr70101/ibmbio/keys.equ	Thu Jan  1 00:00:00 1970
++++ dr70102/ibmbio/keys.equ	Tue Jul 16 12:28:20 2002
+@@ -0,0 +1,5 @@
++NUL	equ	0
++BS	equ	8
++TAB	equ	9
++LF	equ	10
++CR	equ	13
+diff -u -P -r dr70101/ibmbio/udsc.equ dr70102/ibmbio/udsc.equ
+--- dr70101/ibmbio/udsc.equ	Wed Apr 16 10:28:28 1997
++++ dr70102/ibmbio/udsc.equ	Mon Jul 15 19:52:40 2002
+@@ -50,6 +50,8 @@
+ UDSC_LABEL	db	12 dup (?)	; ASCIIZ volume label
+ UDSC_SERIAL	dd	?		; serial number
+ UDSC_FSTYPE	db	9 dup (?)	; ASCIIZ "FAT12"/"FAT16" type
++UDSC_INT13EXT	dw	0		; version of int 13 extensions
++UDSC_INT13BITS	dw	0		; int 13 API support bitmap
+ UDSC		ends
+ 
+ UDSC_LENGTH	equ	size UDSC

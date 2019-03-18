@@ -1,0 +1,24 @@
+7.01.04:
+- added routines to convert LBA values to CHS and vice versa
+- rewrote the partition registering routine to use the LBA values in the
+  partition tables instead of the obsolete CHS values, disabled old code
+- added int 13 extensions (LBA) support to the partition login and track r/w
+  routines
+- added support for partition type 0eh (FAT16B LBA)
+
+7.01.03:
+- added a hex value output routine for debugging purposes
+- changed the behavior of the partition registering routine to not follow loops
+  in the partition tables
+
+7.01.02:
+- changed some text strings to reflect the new version number
+- slightly changed the structure of the start-up message routine
+- added support for ExtendedX (type 0fh) partitions
+- added a routine that checks for and displays the version number of extended
+  int 13 (LBA) support
+- some preliminary changes for LBA support
+
+7.01.01 (original release):
+- fixed the compilation to work with MASM 6.0b and Watcom C/C++ 10.0a
+- no user-visible changes

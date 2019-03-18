@@ -1,0 +1,42 @@
+The DR-DOS/OpenDOS Enhancement Project
+
+Many PC users in the world use DR-DOS because of its advanced features.
+Unfortunately, the development of DR-DOS seems to have stopped and the last
+version was released more than three years ago. Since there is currently no
+other PC operating system that combines so many useful features with full PC
+compatibility, I have decided to write my own set of patches for DR-DOS to
+fix some bugs and add support for new standards.
+Since the source code of later versions of DR-DOS is not freely available, I
+have decided to use the source code of DR-DOS 7.01, better known as OpenDOS, as
+the base for my work.
+You will find the latest patches at http://www.drdosprojects.de, the project's
+official web site. Since it has now got its own domain, this should not change
+anymore.
+
+To use the supplied patches, you need the following:
+- a copy of the original Caldera OpenDOS 7.01 source code archive (DOSSRC.ZIP)
+- a tool capable of unpacking ZIP archives
+- a utility to apply the patches to the source
+- the development tools MASM 6.0b and Watcom C/C++ 10.0a (other versions may
+  work as well, but this has not been tested)
+
+For those who do not want to compile the source code themselves or lack the
+necessary development software, there are also pre-compiled binaries available.
+
+Please note that you need to obtain a license from Caldera if you plan to use
+OpenDOS for commercial purposes. The license agreement is found in license.txt
+in the dossrc.zip archive. This license does still apply for the patched
+versions, except that you should not contact Caldera tech support on matters
+specific to the modified version.
+
+If you use these patches or the precompiled binary versions on my web site, you
+do it at your own risk. I am not responsible for any damage that might occur
+to your hardware or data from using them.
+Due to the experimental nature of these patches and lack of time on my side, I
+cannot provide extensive technical support for them. However, if you find a bug
+that I have not been aware of or if you want to tell me something that you
+think I should know, you can post a message in
+- the DR-DOS forum at http://senac.com/forums/4356/ or
+- the german DR-DOS forum at http://www.senac.com/forums/11868/
+which I usually check at least once in a few days.
+

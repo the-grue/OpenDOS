@@ -1,0 +1,48 @@
+There are currently no serious bugs known to be in Enhanced DR-DOS, but you
+might encounter problems with software that is not adapted to some of its
+features. In particular, you should read the following warnings before using
+any disk tools:
+
+Warning: Beginning with version 7.01.04, DR-DOS is able to use the LBA BIOS
+functions to access hard disk partitions outside the 7.8 GB limit defined by
+the old CHS (cylinder, head & sector) system. This is no problem for any disk
+tools that use DOS functions to access these partitions, however, there are
+many old tools that are not LBA-compliant which use low-level BIOS calls to
+access hard disks. When used on partitions that are not within the space
+accessible via CHS these tools could possibly write data to the wrong sectors
+on the hard disk and thus cause severe damage. This is not a bug in DR-DOS, but
+a limitation of these tools. Some of the disk tools that are included in the
+distributions of DR-DOS 7.0x like fdisk, format, diskopt, etc. may also fall
+into this category. Until they have been tested on LBA partitions and it has
+been found that they are safe to use, do not use them without making a backup
+of your hard disk first.
+
+Warning: Beginning with version 7.01.05, DR-DOS supports FAT16 partitions with
+a cluster size of 64 KB. This feature has been tested and found to be working.
+However, until someone has done extensive tests and it has been found that it
+is generally safe to use, use precautions before using it on partitions that
+contain valuable data. Also, please note that many disk tools do not expect to
+see this feature on a DOS based machine, so they most likely do not support it.
+Windows NT and FreeDOS support it, so tools written for these operating systems
+should be safe to use.
+
+Update: Chkdsk seems to work with both LBA partitions and 64K clusters.
+
+Warning: In version 7.01.06 I have introduced support for the FAT32 file system
+to DR-DOS. However, many disk tools (including those of DR-DOS 7.0x) do not
+support FAT32, at least not in DOS. You should not use any disk tools on FAT32
+drives unless you know that they are compatible with FAT32 and large drives.
+Tools written for FreeDOS or MS-DOS 7 and higher should be safe to use.
+
+Enhanced DR-DOS v7.01.07 again adds new features that might prove incompatible
+with older software:
+- It now supports drives with 128K cluster size. This is mostly untested, since
+  there are no DOS tools that support this cluster size. Existing tools
+  probably cannot handle this size.
+- Several config.sys commands that DR-DOS 7.03 uses to move data structures to
+  upper memory are now supported, some of which have been enhanced to provide
+  additional benefits. Older software might expect to see these structures in
+  lower mem, so you might have to turn those options off to run it.
+  Also, because of enhancements of the internal memory handling, some older TSR
+  programs might not work properly if you load them with INSTALL/HIINSTALL in
+  config.sys. If that is the case, use INSTALLLAST/HIINSTALLLAST instead.

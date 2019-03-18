@@ -1,0 +1,516 @@
+diff -u -P -r dr701/command/char.def dr70101/command/char.def
+--- dr701/command/char.def	Wed Apr 16 12:09:02 1997
++++ dr70101/command/char.def	Thu Jul  4 23:53:08 2002
+@@ -64,7 +64,7 @@
+ CTLX		equ	'X' - '@'
+ CTLY		equ	'Y' - '@'
+ CTLZ		equ	'Z' - '@'
+-ESC		equ	'[' - '@'
++;ESC		equ	'[' - '@'
+ CTLBS		equ	'\' - '@'
+ CTLUB		equ	'_' - '@'
+ CTLUP		equ	'^' - '@'
+diff -u -P -r dr701/command/crit.asm dr70101/command/crit.asm
+--- dr701/command/crit.asm	Wed Apr 16 21:21:36 1997
++++ dr70101/command/crit.asm	Sat Jul  6 15:43:54 2002
+@@ -112,7 +112,7 @@
+ 
+ endif
+ 	extrn	_country:WORD
+-	extrn	__psp:WORD
++	extrn	__psp2:WORD
+ 
+ ifdef DLS
+ TEXT_LEN	equ	320		; it needs to be this size for Japanese
+@@ -251,7 +251,7 @@
+ 	mov	bp,sp
+ 	mov	ah,MS_P_GETPSP
+ 	int	DOS_INT			; Get PSP into DS
+-	mov	ds,cs:__psp	
++	mov	ds,cs:__psp2	
+ 	mov	al,ds:byte ptr 1ah	; use COMMAND STDERR for Console INPUT
+ 	mov	ah,al			;  and OUTPUT
+ 	mov	es,bx
+diff -u -P -r dr701/command/cstart.asm dr70101/command/cstart.asm
+--- dr701/command/cstart.asm	Wed Apr 16 18:11:52 1997
++++ dr70101/command/cstart.asm	Sat Jul  6 15:41:26 2002
+@@ -600,8 +600,8 @@
+ himem_link_size	dw	0
+ 		db	5
+ 
+-	public	__psp
+-__psp		dw	0
++	public	__psp2
++__psp2		dw	0
+ 
+ 	Public	_batch_seg_ptr
+ _batch_seg_ptr	dw	dataOFFSET batch_seg_ptr
+@@ -690,8 +690,8 @@
+ 
+ ifdef CDOSTMP	
+ 
+-	Public	__psp
+-__psp		dw	0
++	Public	__psp2
++__psp2		dw	0
+ 
+ cmd_histbuf	dw	0		; Command Processor History Buffer
+ prog_histbuf	dw	0		; Program History Buffer
+@@ -1157,7 +1157,7 @@
+ gotCS:
+ 	;out	0fdh,al			; for debug purposes
+ 	
+-	mov	[__psp],ds		; Save our PSP in the local variable
++	mov	[__psp2],ds		; Save our PSP in the local variable
+ ifdef DOSPLUS
+ 	mov	ax,cs			; put our stack somewhere safe
+ 	mov	ss,ax
+@@ -1181,7 +1181,7 @@
+ 				    ; memory so remember the current segment
+ 
+ 	mov	bx,cs			; Path up the JMPF instructions
+-	sub	bx,[__psp]		; around the MSDOS EXEC code to
++	sub	bx,[__psp2]		; around the MSDOS EXEC code to
+ 	mov	cl,4
+ 	shl	bx,cl
+ 	add	cs:[exec_psp-2],bx
+@@ -1230,9 +1230,9 @@
+ 	mov	cl,4			; and convert to a paragraphs
+ 	shr	si,cl
+ 	mov	bx,ax			; Get the Current DS
+-	sub	bx,__psp		; and calculate DS - PSP Seg
++	sub	bx,__psp2		; and calculate DS - PSP Seg
+ 	add	bx,si			; DS + Data length in Para's
+-	mov	es,__psp
++	mov	es,__psp2
+ 	mov	ah,MS_M_SETBLOCK
+ 	int	DOS_INT
+ 
+@@ -1275,7 +1275,7 @@
+ 	shr	si,cl
+ 	call	get_ds
+ 	mov	bx,ax			; Get the Current DS
+-	sub	bx,__psp		; and calculate DS - PSP Seg
++	sub	bx,__psp2		; and calculate DS - PSP Seg
+ 	add	bx,si			; DS + Data length in Para's
+ 	mov	ah,MS_M_SETBLOCK
+ 	int	DOS_INT
+@@ -1302,7 +1302,7 @@
+ ;
+ exec_name:
+ 	push	es
+-	mov	es,__psp		; Get the PSP Segment Address
++	mov	es,__psp2		; Get the PSP Segment Address
+ 	mov	dx,PSP_ENVIRON		; Get the environment segment
+ 	cmp	dx,0000			; Have we got an environment ?
+ 	jz	exec_n11		; No prevent High Code Support
+@@ -1609,11 +1609,11 @@
+ 	mov	es:word ptr 3[bx],cs	; Insert the correct code seg
+ 	mov	dx,bx
+ 	mov	bx,es	
+-	sub	bx,__psp		; Calculate the correct offset for
++	sub	bx,__psp2		; Calculate the correct offset for
+ 	mov	cl,4			; the interrupt handler if the segment
+ 	shl	bx,cl			; must be that of our PSP
+ 	add	dx,bx
+-	mov	ds,__psp
++	mov	ds,__psp2
+ 	mov	ah,MS_S_SETINT
+ 	int	DOS_INT
+ 	pop	es
+@@ -1639,7 +1639,7 @@
+ 
+ 	mov	ah, MS_P_GETPSP		; Get the current PSP address
+ 	int	DOS_INT
+-	cmp	bx,[__psp]		; Is this our address
++	cmp	bx,[__psp2]		; Is this our address
+ 	stc				; Assume not and Set the carry flag
+ 	jz	break_10		; if internal, restart the command loop
+ 					; if external, abort process
+@@ -1704,7 +1704,7 @@
+ 
+ 	mov	ah, MS_P_GETPSP		; Get the current PSP address
+ 	int	DOS_INT
+-	cmp	bx,[__psp]		; Is this our address?
++	cmp	bx,[__psp2]		; Is this our address?
+ 	 jne	critical_e10		; no so return with Abort code
+ 
+ 	cmp	in_exec,0		; are we EXECing a program ?
+@@ -1821,7 +1821,7 @@
+ ;	install our own Break and Criterr handlers - e.g. if second copy
+ ;	of the command processor is running, install original handlers so
+ ;	that they are looking at the same data as we are.
+-;	N.B. __psp is currently that of original command processor
++;	N.B. __psp2 is currently that of original command processor
+ 
+ 	mov	ax, (MS_S_GETINT*256) + 23h
+ 	int	DOS_INT
+@@ -1835,7 +1835,7 @@
+ 	
+ 	call	handler_init
+ 	
+-;	save the command processor's __psp variable, and then set it to the
++;	save the command processor's __psp2 variable, and then set it to the
+ ;	psp of the process that called us. This is so that the Break and 
+ ;	Criterr abort code can correctly determine whether the int2e command 
+ ;	was internal or external
+@@ -1843,7 +1843,7 @@
+ 	mov	ah, MS_P_GETPSP
+ 	int	DOS_INT
+ 	push	bx		; save calling process's psp - EJH	
+-	mov	bx, [__psp]
++	mov	bx, [__psp2]
+ 
+ ; Set current PSP to our own - EJH	
+ 	mov	ah, MS_P_SETPSP
+@@ -2115,7 +2115,7 @@
+ 
+ 					; swap stack to conventional memory
+ 	cli				;
+-	mov	ax,__psp		;
++	mov	ax,__psp2		;
+ 	mov	ss,ax			;
+ 	mov	sp,0100h		;
+ 	sti				;
+@@ -2551,7 +2551,7 @@
+ 	
+ 	
+ 	mov	ax,es:P_PSP[bx]
+-	mov	[__psp],ax
++	mov	[__psp2],ax
+ 	
+ 	mov	ax,XIOS_HISTBUF		; Get the History Buffer Address's
+ 	mov	dl,defconsole		; for console number
+@@ -2795,7 +2795,7 @@
+ 	mov	di,heap_top			; copy cmdline onto the heap
+ endif
+ 	push	ds				; Preserve DS and point to PSP
+-	mov	ds,__psp			; Get the PSP address
++	mov	ds,__psp2			; Get the PSP address
+ 	xor	cx,cx				; Now copy the command line
+ 	mov	cl,ds:0080h			; Get the Command length
+ 	mov	si,0081h			; and its start location
+@@ -2829,7 +2829,7 @@
+ 	Public	_install_perm
+ _install_perm:
+ 	push	es
+-	mov	ax,__psp			; Modify the INT 22 and 2E
++	mov	ax,__psp2			; Modify the INT 22 and 2E
+ 	mov	es,ax				; vectors if the current process
+ 	cmp	ax,PSP_PARENT			; is the ROOT DOS process. ie
+ 	jnz	inst_p10			; PSP_PARENT == PSP
+@@ -2848,7 +2848,7 @@
+ 	push	ds				; because some TSR management
+ 	pop	es				; programs examine these variables
+ 	lea	di,psp_save_area		; ES:DI -> save area for PSP
+-	mov	ds,__psp
++	mov	ds,__psp2
+ 	lea	si,PSP_TERM_IP			; DS:SI -> data in PSP to save
+ 	mov	cx,6
+ 	rep	movsw				; save the data for later EXIT
+@@ -2870,11 +2870,11 @@
+ inst_p30:
+ 	push	ds
+ 	mov	bx,[low_seg]
+-	sub	bx,__psp		; Calculate the correct offset for
++	sub	bx,__psp2		; Calculate the correct offset for
+ 	mov	cl,4			; the interrupt handler if the segment
+ 	shl	bx,cl			; must be that of our PSP
+ 	add	dx,bx
+-	mov	ds,__psp
++	mov	ds,__psp2
+ 	mov	ah,MS_S_SETINT
+ 	int	DOS_INT
+ 	pop	ds
+@@ -2888,7 +2888,7 @@
+ 	Public	_restore_term_addr
+ _restore_term_addr:
+ 	push	es
+-	mov	ax,__psp			; Restore the PSP we altered
++	mov	ax,__psp2			; Restore the PSP we altered
+ 	mov	es,ax				; if the current process
+ 	cmp	ax,PSP_PARENT			; is the ROOT DOS process. ie
+ 	 jne	restore_ta10			; PSP_PARENT == PSP
+@@ -2938,7 +2938,7 @@
+ 	mov	bx,04[bp]		; Save the Specified Size
+ 	add	bx,15			; and force it to be an integer 
+ 	and	bx,not 15		; multiple of 16
+-	mov	es,__psp		; Get the PSP Segment Address
++	mov	es,__psp2		; Get the PSP Segment Address
+ 	
+ 	mov	cx,PSP_ENVIRON		; Get the environment segemnt
+ 	jcxz	master_env10		; Have we been loaded by DesQview ?
+@@ -2974,7 +2974,7 @@
+ 	pop	cx
+ 	jc	master_env30		; Abort Memory Allocation Failed
+ 
+-	mov	es,__psp		; Copy the Environemt
++	mov	es,__psp2		; Copy the Environemt
+ 	xchg	ax,PSP_ENVIRON		; Update the Environment Pointer
+ 	push	ds
+ 	mov	ds,ax			; DS -> Initial Environment
+@@ -3578,10 +3578,10 @@
+ 	rep	movsb			; move'em
+ 	
+ 	mov	bx,ds
+-	sub	bx,[__psp]		; ax = difference between psp and data
++	sub	bx,[__psp2]		; ax = difference between psp and data
+ 	add	bx,HISEG_OFF/16		; add size of bit we leave behind
+ 
+-	mov	es,[__psp]		; es -> old location	
++	mov	es,[__psp2]		; es -> old location	
+ 
+ 	mov	ds,ax			; this is the new data seg
+ 	mov	ss,ax			; and also the new stack seg
+diff -u -P -r dr701/command/csup.asm dr70101/command/csup.asm
+--- dr701/command/csup.asm	Wed Apr 16 18:32:26 1997
++++ dr70101/command/csup.asm	Sat Jul  6 15:43:02 2002
+@@ -277,7 +277,7 @@
+ ;
+ get_env	PROC	near
+ 	push	es
+-	mov	dx,__psp		; Get the Current PSP in DX
++	mov	dx,__psp2		; Get the Current PSP in DX
+ 	mov	es,dx			; and point ES at Our PSP
+ 	xor	ax,ax			; and assume an error condition
+ 	mov	bx,es:002Ch		; get environment segment
+@@ -738,7 +738,7 @@
+ 
+ 	page
+ _DATA	SEGMENT	byte public 'DATA'
+-	extrn	__psp:word
++	extrn	__psp2:word
+ 	extrn	_end:byte
+ 	extrn	_break_env:word
+ 	extrn	low_seg:word
+diff -u -P -r dr701/command/dosif.asm dr70101/command/dosif.asm
+--- dr701/command/dosif.asm	Tue Jun 28 16:01:14 1994
++++ dr70101/command/dosif.asm	Sat Jul  6 15:42:18 2002
+@@ -119,13 +119,13 @@
+ 	ret
+ 	ENDM
+ 
+-ifndef	??Version			;; Turbo Assembler always knows RETF
+-ifndef	retf				;; some versions of MASM do as well
+-retf	macro				;; define far return macro for others
+-	db	0cbh
+-	endm
+-endif
+-endif
++;ifndef	??Version			;; Turbo Assembler always knows RETF
++;ifndef	retf				;; some versions of MASM do as well
++;retf	macro				;; define far return macro for others
++;	db	0cbh
++;	endm
++;endif
++;endif
+ 
+ 
+ ifndef	CDOSTMP
+@@ -180,7 +180,7 @@
+ 
+ 
+ _DATA	SEGMENT	byte public 'DATA'
+-	extrn	__psp:word
++	extrn	__psp2:word
+ ifndef DOSPLUS
+ 	extrn	_pd:dword		; Process Descriptor Pointer
+ endif
+@@ -282,7 +282,7 @@
+ 	push	es
+ 
+ ifdef CDOSTMP
+-	mov	es,__psp		; ES:0 -> our PSP
++	mov	es,__psp2		; ES:0 -> our PSP
+ else
+ 	mov	ah,MS_P_GETPSP
+ 	int	DOS_INT			; for software carousel
+@@ -607,7 +607,7 @@
+ 
+ ifdef NETWARE
+ 	push	es			; If this is Novell Netware and
+-	mov	ax,__psp		; the command processor is terminating
++	mov	ax,__psp2		; the command processor is terminating
+ 	mov	es,ax			; ie PSP_PARENT == PSP then do the
+ 	cmp	ax,es:word ptr 16h	; special Novell Close down sequence
+ 	pop	es
+diff -u -P -r dr701/command/make.bat dr70101/command/make.bat
+--- dr701/command/make.bat	Thu Apr 17 19:52:12 1997
++++ dr70101/command/make.bat	Sat Jul  6 15:48:00 2002
+@@ -1,11 +1,11 @@
+ @ECHO off
+-SET TOOLS=C:\TOOLS
++SET TOOLS=C:\MASM\BINB
+ 
+-SET MASM=%TOOLS%\MASM.EXE
+-SET WATCOM=%TOOLS%\WATCOMC
+-SET WATCOMH=%TOOLS%\WATCOMC\H
++SET MASM=C:\MASM\BIN\ML.EXE /c /Zm
++SET WATCOM=C:\WATCOM
++SET WATCOMH=%WATCOM%\H
+ SET WCG=%WATCOM%\BIN\WCGL.EXE
+-SET WCC=%WATCOM%\BIN\WCC.EXE
++SET WC=%WATCOM%\BINB\WCC.EXE
+ SET LINK510=%TOOLS%\LINK.EXE
+ SET BCC20=%TOOLS%\BCC.EXE
+ SET BCC20H=%TOOLS%\BCC20\H
+@@ -23,46 +23,43 @@
+ 
+ ECHO Checking for %MASM%
+ if not exist %MASM% goto badtool
+-ECHO Checking for %WCC%
+-if not exist %WCC% goto badtool
++ECHO Checking for %WC%
++if not exist %WC% goto badtool
+ ECHO Checking for %LINK510%
+ if not exist %LINK510% goto badtool
+-ECHO Checking for %BCC20%
+-if not exist %BCC20% goto badtool
+ 
+-
+-%MASM% message,.\bin\message;
++%MASM% /Fo.\bin\message message
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% resident,.\bin\resident;
++%MASM% /Fo.\bin\resident resident
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% txhelp,.\bin\txhelp;
++%MASM% /Fo.\bin\txhelp txhelp
+ IF ERRORLEVEL 1 GOTO FAILED
+ 
+-%MASM% /DDOSPLUS /DWATCOMC /DPASCAL /DFINAL /MX /I.\ .\cstart.asm,.\bin\cstart.obj;
++%MASM% /DDOSPLUS /DWATCOMC /DPASCAL /DFINAL /I.\ /Fo.\bin\cstart.obj .\cstart.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /DDOSPLUS /DWATCOMC /DPASCAL /DFINAL /MX /I.\ .\csup.asm,.\bin\csup.obj;
++%MASM% /DDOSPLUS /DWATCOMC /DPASCAL /DFINAL /I.\ /Fo.\bin\csup.obj .\csup.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /DDOSPLUS /DWATCOMC /DPASCAL /DFINAL /MX /I.\ .\dosif.asm,.\bin\dosif.obj;
++%MASM% /DDOSPLUS /DWATCOMC /DPASCAL /DFINAL /I.\ /Fo.\bin\dosif.obj .\dosif.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /DDOSPLUS /DWATCOMC /DPASCAL /DFINAL /MX /I.\ .\crit.asm,.\bin\crit.obj;
++%MASM% /DDOSPLUS /DWATCOMC /DPASCAL /DFINAL /I.\ /Fo.\bin\crit.obj .\crit.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+ 
+-%WCC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\com.obj .\com.c
++%WC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\com.obj .\com.c
+ IF ERRORLEVEL 1 GOTO FAILED
+-%WCC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\comint.obj .\comint.c
++%WC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\comint.obj .\comint.c
+ IF ERRORLEVEL 1 GOTO FAILED
+-%WCC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\support.obj .\support.c
++%WC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\support.obj .\support.c
+ IF ERRORLEVEL 1 GOTO FAILED
+ 
+-%WCC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\printf.obj .\printf.c
++%WC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\printf.obj .\printf.c
+ IF ERRORLEVEL 1 GOTO FAILED
+-%WCC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\batch.obj .\batch.c
++%WC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\batch.obj .\batch.c
+ IF ERRORLEVEL 1 GOTO FAILED
+-%WCC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\global.obj .\global.c
++%WC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\global.obj .\global.c
+ IF ERRORLEVEL 1 GOTO FAILED
+-%WCC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\config.obj .\config.c
++%WC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\config.obj .\config.c
+ IF ERRORLEVEL 1 GOTO FAILED
+-%WCC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\comcpy.obj .\comcpy.c
++%WC% /s /DFINAL /i=. /ms /os /dWATCOMC /i=%WATCOMH% /fo.\bin\comcpy.obj .\comcpy.c
+ IF ERRORLEVEL 1 GOTO FAILED
+ 
+ ECHO -w -d -f- -K -O -X -Z -c -ms -I%BCC20H% -DMESSAGE -DDOSPLUS -zSCGROUP -zTCODE -zR_MSG > RESP1
+@@ -81,11 +78,11 @@
+ ECHO .\bin\resident.obj>> RESP2
+ ECHO .\bin\command.exe>> RESP2
+ ECHO .\command.map>> RESP2
+-ECHO %WATCOM%\LIB\CLIBs>> RESP2
++ECHO %WATCOM%\LIB286\DOS\CLIBs>> RESP2
+ %LINK510% /MAP @resp2;
+ IF ERRORLEVEL 1 GOTO FAILED
+ 
+-%MASM% /DDOSPLUS /DWATCOMC /DPASCAL /DFINAL /MX /I.\ .\helpstub.asm,.\bin\helpstub.obj;
++%MASM% /DDOSPLUS /DWATCOMC /DPASCAL /DFINAL /I.\ /Fo.\bin\helpstub.obj .\helpstub.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+ ECHO .\bin\helpstub.obj+> RESP3
+ ECHO .\bin\txhelp.obj>> RESP3
+@@ -112,7 +109,7 @@
+ REM **********************
+ SET TOOLS=
+ SET MASM=
+-SET WCC=
++SET WC=
+ SET LINK510=
+ SET BCC20=
+ SET WATCOMH=
+diff -u -P -r dr701/ibmbio/init.asm dr70101/ibmbio/init.asm
+--- dr701/ibmbio/init.asm	Wed Apr 16 09:17:36 1997
++++ dr70101/ibmbio/init.asm	Thu Jul  4 21:24:40 2002
+@@ -61,9 +61,9 @@
+ 	org address
+ 	is = offset $
+ 	if was GT is
+-	if2
+-		%OUT ERROR - absolute data overwritten !! moving it
+-	endif
++;	if2
++;		%OUT ERROR - absolute data overwritten !! moving it
++;	endif
+ 	org	was
+ endif
+ ENDM
+diff -u -P -r dr701/ibmbio/make.bat dr70101/ibmbio/make.bat
+--- dr701/ibmbio/make.bat	Thu Apr 17 19:52:08 1997
++++ dr70101/ibmbio/make.bat	Thu Jul  4 21:24:00 2002
+@@ -1,7 +1,7 @@
+ @ECHO off
+-SET TOOLS=C:\TOOLS
++SET TOOLS=C:\MASM\BINB
+ 
+-SET MASM=%TOOLS%\MASM.EXE
++SET MASM=C:\MASM\BIN\ML.EXE
+ SET LINK=%TOOLS%\LINK.EXE
+ SET LIBR=%TOOLS%\LIB.EXE
+ 
+@@ -28,23 +28,23 @@
+ REM Build .ASM files first, get the obj's
+ REM *************************************
+ 
+-%MASM% /t initmsgs,.\BIN\initmsgs;
++%MASM% /c /Zm /Fo.\BIN\initmsgs initmsgs.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /t biosmsgs,.\BIN\biosmsgs;
++%MASM% /c /Zm /Fo.\BIN\biosmsgs biosmsgs.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /t init,.\BIN\init;
++%MASM% /c /Zm /Fo.\BIN\init init.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /t clock,.\BIN\clock;
++%MASM% /c /Zm /Fo.\BIN\clock clock.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /t console,.\BIN\console;
++%MASM% /c /Zm /Fo.\BIN\console console.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /t disk,.\BIN\disk;
++%MASM% /c /Zm /Fo.\BIN\disk disk.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /t serpar,.\BIN\serpar;
++%MASM% /c /Zm /Fo.\BIN\serpar serpar.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /t biosgrps,.\BIN\biosgrps;
++%MASM% /c /Zm /Fo.\BIN\biosgrps biosgrps.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+-%MASM% /t stacks,.\BIN\stacks;
++%MASM% /c /Zm /Fo.\BIN\stacks stacks.asm
+ IF ERRORLEVEL 1 GOTO FAILED
+ 
+ REM ******************************************
+diff -u -P -r dr701/ibmdos/make.bat dr70101/ibmdos/make.bat
+--- dr701/ibmdos/make.bat	Thu Apr 17 19:54:04 1997
++++ dr70101/ibmdos/make.bat	Thu Jul  4 21:36:00 2002
+@@ -1,6 +1,6 @@
+ @ECHO off
+ 
+-SET TOOLS=C:\TOOLS
++SET TOOLS=C:\MASM\BINB
+ 
+ REM 
+ REM YOU SHOULD NOT HAVE TO CHANGE ANYTHING BELOW THIS LINE.
